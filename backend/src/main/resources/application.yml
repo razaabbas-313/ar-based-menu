@@ -1,0 +1,132 @@
+# =====================================================================
+# Atelier 3D & Media Engine v3 - defaults (PostgreSQL + real AWS S3)
+# Profiles: 'local' (default, your local PostgreSQL), add 'h2' for a zero-install database.
+# =====================================================================
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,application/problem+json
+    min-response-size: 1024
+  # Request bodies here are tiny JSON documents; file bytes never reach this server.
+  tomcat:
+    max-swallow-size: 64KB
+    max-http-form-post-size: 64KB
+
+spring:
+  application:
+    name: atelier-media-engine
+  profiles:
+    default: prod
+  config:
+    # Optional, git-ignored file for local secrets (AWS keys, JWT secret, super-admin password).
+    import: "optional:file:./secrets.properties,optional:file:./backend/secrets.properties"
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    # Driver is detected from the URL (PostgreSQL here, H2 in the local profile).
+    url: "${DB_URL:}"
+    username: "${DB_USERNAME:}"
+    password: "${DB_PASSWORD:}"
+    hikari:
+      pool-name: atelier-hikari
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: 2
+      connection-timeout: 5000        # ms to wait for a connection from the pool
+      validation-timeout: 3000
+      idle-timeout: 300000            # 5 min
+      max-lifetime: 1500000           # 25 min, below typical RDS/pgbouncer limits
+      keepalive-time: 120000          # 2 min
+      leak-detection-threshold: 20000
+      auto-commit: false
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none                  # Flyway owns the schema
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 25
+        connection:
+          provider_disables_autocommit: true
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    # {vendor} resolves to 'postgresql' or 'h2' from the JDBC URL.
+    locations: classpath:db/migration/{vendor}
+    baseline-on-migrate: true
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: always
+
+# Real AWS S3 only. Set these environment variables before starting the API.
+aws:
+  region: ${AWS_REGION:ap-south-1}
+  access-key-id: ${AWS_ACCESS_KEY_ID:}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+  s3:
+    bucket: ${AWS_S3_BUCKET:atelier-ar-bucket}
+    # Optional: your CloudFront distribution, e.g. https://d1234.cloudfront.net
+    public-base-url: ${AWS_S3_PUBLIC_BASE_URL:}
+
+atelier:
+  key-prefix: restaurant-atelier      # objects: restaurant-atelier/{slug}/{media-type}/{uuid}.{ext}
+  private-key-prefix: ${ATELIER_PRIVATE_KEY_PREFIX:restaurant-atelier-private} # private objects: restaurant-atelier-private/{slug}/...
+  presign-ttl: PT5M
+  stale-upload-ttl: PT15M
+  reaper-interval: PT5M
+  max-image-bytes: 8388608            # 8 MB after client compression (normally < 600 KB)
+  max-model-bytes: 52428800           # 50 MB .glb
+  max-published-model-bytes: 26214400 # 25 MB published model cap
+  max-branding-bytes: 4194304         # 4 MB logo / banner after client compression
+  menu-limit: 500
+  directory-limit: 200
+  jwt:
+    # REQUIRED in production: at least 32 random bytes. The app refuses to start without it.
+    secret: ${ATELIER_JWT_SECRET:}
+    issuer: atelier-media-engine
+    ttl: ${ATELIER_JWT_TTL:P30D}
+    impersonation-ttl: ${ATELIER_JWT_IMPERSONATION_TTL:P7D}
+  cors:
+    # Comma-separated origins or patterns, e.g. https://atelier.example.com,https://*.vercel.app
+    allowed-origins: ${ATELIER_CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  login:
+    max-failures: 5
+    lockout: PT15M
+  super-admin:
+    email: ${ATELIER_SUPERADMIN_EMAIL:admin@atelier.local}
+    # Blank = generate a random password on first start and print it once in the log.
+    initial-password: ${ATELIER_SUPERADMIN_PASSWORD:}
+    reset-password: ${ATELIER_SUPERADMIN_RESET:false}
+  password-reset:
+    enabled: ${ATELIER_PASSWORD_RESET_ENABLED:false}
+  trusted-proxies: ${ATELIER_TRUSTED_PROXIES:}
+  scheduling:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    com.atelier.media: INFO
+    org.hibernate.SQL: WARN

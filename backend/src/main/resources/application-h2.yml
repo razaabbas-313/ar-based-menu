@@ -1,0 +1,7 @@
+# 'h2' profile: zero-install H2 file database in PostgreSQL compatibility mode (./data/).
+# Combine with 'local':  mvn spring-boot:run -Dspring-boot.run.profiles=local,h2
+spring:
+  datasource:
+    url: "jdbc:h2:file:./data/atelier-local;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=TRUE"
+    username: sa
+    password: ""

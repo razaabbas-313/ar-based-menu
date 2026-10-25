@@ -1,0 +1,228 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  /* default accent = warm amber; utils/theme.js overrides per restaurant */
+  --accent-300: 252 211 77;
+  --accent-400: 251 191 36;
+  --accent-500: 245 158 11;
+  --accent-600: 217 119 6;
+}
+
+html,
+body {
+  background: #09090b;
+}
+
+body {
+  font-family: Manrope, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  background:
+    radial-gradient(1100px 520px at 78% -12%, rgba(245, 158, 11, 0.09), transparent 62%),
+    radial-gradient(800px 500px at -10% 30%, rgba(217, 119, 6, 0.05), transparent 60%),
+    #09090b;
+  background-attachment: fixed;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100%;
+}
+
+/* ---- <model-viewer> ---- */
+model-viewer {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: transparent;
+  --poster-color: transparent;
+  --progress-bar-color: transparent;
+}
+model-viewer::part(default-progress-bar) {
+  display: none;
+}
+model-viewer::part(default-ar-button) {
+  display: none;
+}
+
+/* ---- atelier surfaces ---- */
+.stage-bg {
+  background:
+    radial-gradient(60% 45% at 50% 62%, rgba(245, 158, 11, 0.13), transparent 70%),
+    radial-gradient(120% 90% at 50% 0%, #1b1916 0%, #121214 55%, #0d0d0f 100%);
+}
+.glass {
+  background: rgba(18, 18, 20, 0.72);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+.hairline {
+  border-color: #27272a;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.tap {
+  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s, border-color 0.2s, color 0.2s,
+    box-shadow 0.2s, opacity 0.2s;
+}
+.tap:active {
+  transform: scale(0.965);
+}
+.tap:disabled {
+  cursor: not-allowed;
+}
+
+/* ---- motion ---- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; } /* backwards: hover transforms still apply afterwards */
+
+/* ---- v4 guest menu ---- */
+.stage-warm {
+  background:
+    radial-gradient(70% 60% at 50% 30%, rgba(255, 168, 88, 0.24), transparent 70%),
+    radial-gradient(60% 50% at 50% 100%, rgba(120, 60, 20, 0.35), transparent 70%),
+    #120d09;
+}
+.momentum { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.skeleton {
+  background: linear-gradient(100deg, #141416 30%, #1e1e21 50%, #141416 70%);
+  background-size: 300% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+@keyframes skeleton {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+.ambient {
+  background:
+    radial-gradient(60% 80% at 75% 10%, rgb(var(--accent-500) / 0.32), transparent 70%),
+    radial-gradient(50% 70% at 10% 90%, rgb(var(--accent-600) / 0.22), transparent 70%),
+    radial-gradient(40% 50% at 50% 50%, rgba(255, 255, 255, 0.04), transparent 70%),
+    #0d0d10;
+  background-size: 140% 140%;
+  animation: ambient 18s ease-in-out infinite alternate;
+}
+@keyframes ambient {
+  from { background-position: 0% 0%; }
+  to { background-position: 100% 100%; }
+}
+@keyframes arPing {
+  0% { transform: scale(1); opacity: 0.7; }
+  80%, 100% { transform: scale(2.6); opacity: 0; }
+}
+.ar-ping { animation: arPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@keyframes sheet {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.sheet { animation: sheet 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes drawer {
+  from { transform: translateX(40px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.drawer { animation: drawer 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade { animation: fade 0.25s ease-out both; }
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.35), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+  70% { box-shadow: 0 0 0 14px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+.pulse-ring { animation: pulseRing 2.4s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .sheet, .drawer, .fade, .shimmer, .pulse-ring, .skeleton, .ambient, .ar-ping { animation: none; }
+}
+
+/* ---- range inputs (inspector lighting) ---- */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 32px;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 3px;
+  background: #27272a;
+  border-radius: 9px;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9.5px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+}
+input[type='range']::-moz-range-track {
+  height: 3px;
+  background: #27272a;
+  border-radius: 9px;
+}
+input[type='range']::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+/* ---- v3 guest menu ---- */
+.menu-section {
+  scroll-margin-top: 132px;
+}
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+@layer utilities {
+  /* in @layer utilities so Tailwind variants work (hover:accent-glow) */
+  .accent-glow {
+    box-shadow: 0 0 0 1px rgb(var(--accent-500) / 0.12), 0 24px 60px -28px rgb(var(--accent-500) / 0.45);
+  }
+}
+.kpi-glow {
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.18), 0 18px 50px -24px rgba(245, 158, 11, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}

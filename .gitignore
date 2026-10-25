@@ -1,0 +1,51 @@
+# =========================================================================
+# Atelier 3D Media Engine - Git Ignore Rules
+# =========================================================================
+
+# Secrets and environment configs (NEVER commit credentials)
+secrets.properties
+backend/secrets.properties
+*.env
+*.env.local
+*.env.production
+*.env.development
+!*.env.example
+
+# Java / Spring Boot build artifacts
+target/
+**/target/
+*.class
+*.jar
+*.war
+
+# Node / React build artifacts
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.package-lock.json
+
+# Local runtime data and temporary uploads
+backend/data/
+backend/uploads/
+data/
+uploads/
+
+# IDE and editor settings
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+**/logs/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

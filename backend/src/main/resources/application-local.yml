@@ -1,0 +1,36 @@
+# =====================================================================
+# 'local' profile (the default): your local PostgreSQL + your real AWS S3 bucket.
+#
+#   mvn spring-boot:run
+#
+# No PostgreSQL? Add the 'h2' profile for a zero-install file database:
+#   mvn spring-boot:run -Dspring-boot.run.profiles=local,h2
+#
+# Secrets (AWS keys, JWT secret, super-admin password) go in backend/secrets.properties,
+# which is git-ignored. See secrets.example.properties.
+# =====================================================================
+
+spring:
+  datasource:
+    url: "${DB_URL:jdbc:postgresql://localhost:5432/atelier?reWriteBatchedInserts=true&ApplicationName=atelier-media-engine}"
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:admin}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+
+atelier:
+  jwt:
+    # Development-only key so the API starts without configuration. Never use it in production.
+    secret: ${ATELIER_JWT_SECRET:local-development-only-jwt-secret-change-me-0123456789}
+  cors:
+    # Any origin, so phones on your Wi-Fi can reach the API during testing.
+    allowed-origins: ${ATELIER_CORS_ORIGINS:*}
+  super-admin:
+    email: ${ATELIER_SUPERADMIN_EMAIL:admin@atelier.local}
+    initial-password: ${ATELIER_SUPERADMIN_PASSWORD:Admin@123456}
+    reset-password: ${ATELIER_SUPERADMIN_RESET:true}
+
+logging:
+  level:
+    com.atelier.media: DEBUG

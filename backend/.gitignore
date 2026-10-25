@@ -1,0 +1,6 @@
+target/
+data/
+secrets.properties
+*.log
+.idea/
+*.iml
