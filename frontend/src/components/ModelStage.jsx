@@ -65,17 +65,33 @@ export default function ModelStage({
     const el = ref.current;
     if (!el || !libraryReady) return undefined;
     if (viewerRef) viewerRef.current = el;
+
+    if (el.loaded) {
+      setState('ready');
+      setProgress(1);
+      onProgress?.(1);
+      onReady?.(el);
+    }
+
     const handleProgress = (e) => {
       const p = e.detail?.totalProgress ?? 0;
       setProgress(p);
       onProgress?.(p);
+      if (p >= 1 && el.loaded) {
+        setState('ready');
+        onReady?.(el);
+      }
     };
     const onLoad = () => {
       setState('ready');
+      setProgress(1);
       onProgress?.(1);
       onReady?.(el);
     };
-    const onError = () => setState('error');
+    const onError = (err) => {
+      console.error('[ModelStage] Failed to load 3D model from:', src, err);
+      setState('error');
+    };
     const onCamera = (e) => {
       if (e.detail?.source === 'user-interaction') onInteract?.();
     };
@@ -90,7 +106,7 @@ export default function ModelStage({
       el.removeEventListener('camera-change', onCamera);
       if (viewerRef && viewerRef.current === el) viewerRef.current = null;
     };
-  }, [viewerRef, libraryReady, onReady, onProgress, onInteract]);
+  }, [viewerRef, libraryReady, onReady, onProgress, onInteract, src]);
 
   useEffect(() => {
     const el = ref.current;

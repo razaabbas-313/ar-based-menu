@@ -86,7 +86,7 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .headers(h -> h
                         .contentSecurityPolicy(csp -> csp
-                                .policyDirectives("default-src 'self'; img-src 'self' data: https: blob:; model-src 'self' https: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';"))
+                                .policyDirectives("default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; model-src 'self' https: blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: data: blob:; frame-ancestors 'none';"))
                         .frameOptions(f -> f.deny())
                         .contentTypeOptions(Customizer.withDefaults()))
                 .addFilterAfter(new org.springframework.web.filter.OncePerRequestFilter() {
