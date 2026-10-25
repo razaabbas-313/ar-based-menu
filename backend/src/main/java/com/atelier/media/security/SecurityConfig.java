@@ -112,7 +112,7 @@ public class SecurityConfig {
                         // Guest menus and analytics events
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/menu/*", "/api/v1/restaurants/*/menu").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/analytics/event").permitAll()
-                        .requestMatchers("/actuator/health/**", "/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers("/health", "/actuator/health/**", "/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Tier 1: platform owner
                         .requestMatchers("/api/v1/admin/**").hasAuthority(TokenService.ROLE_SUPER_ADMIN)
