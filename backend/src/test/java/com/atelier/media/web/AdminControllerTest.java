@@ -66,6 +66,9 @@ class AdminControllerTest {
     private AdminService adminService;
 
     @MockBean
+    private com.atelier.media.service.AdminAccess adminAccess;
+
+    @MockBean
     private AdminAuthService adminAuthService;
 
     @MockBean

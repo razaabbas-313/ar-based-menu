@@ -31,6 +31,7 @@ import com.atelier.media.service.CategoryService;
 import com.atelier.media.service.DishService;
 import com.atelier.media.service.MenuCache;
 import com.atelier.media.service.ModelRequestService;
+import com.atelier.media.service.RestaurantAccess;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -39,6 +40,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -55,6 +57,7 @@ import java.util.List;
 public class StudioController {
 
     private final DishService dishService;
+    private final RestaurantAccess restaurantAccess;
     private final BrandingService brandingService;
     private final CategoryService categoryService;
     private final ModelRequestService modelRequestService;
@@ -63,7 +66,7 @@ public class StudioController {
     private final MenuCache menuCache;
     private final PublicMenuService publicMenuService;
 
-    public StudioController(DishService dishService,
+    public StudioController(DishService dishService, RestaurantAccess restaurantAccess,
                             BrandingService brandingService,
                             CategoryService categoryService,
                             ModelRequestService modelRequestService,
@@ -72,6 +75,7 @@ public class StudioController {
                             MenuCache menuCache,
                             PublicMenuService publicMenuService) {
         this.dishService = dishService;
+        this.restaurantAccess = restaurantAccess;
         this.brandingService = brandingService;
         this.categoryService = categoryService;
         this.modelRequestService = modelRequestService;
@@ -79,6 +83,12 @@ public class StudioController {
         this.restaurantRepository = restaurantRepository;
         this.menuCache = menuCache;
         this.publicMenuService = publicMenuService;
+    }
+
+    /** Fail closed for all studio handlers, including those delegating by restaurant ID. */
+    @ModelAttribute
+    public void requireStudioAccess(@AuthenticationPrincipal Jwt jwt) {
+        restaurantAccess.requireStudioAccess(Tenant.from(jwt));
     }
 
     @GetMapping("/menu-preview")

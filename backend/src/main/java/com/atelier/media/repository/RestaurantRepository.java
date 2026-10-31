@@ -25,6 +25,11 @@ public interface RestaurantRepository extends JpaRepository<Restaurant, Long>, J
 
     Optional<Restaurant> findByEmail(String email);
 
+    /** Serializes OTP issuance and redemption, including when no OTP row exists yet. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM Restaurant r WHERE r.email = :email")
+    Optional<Restaurant> findByEmailForUpdate(@Param("email") String email);
+
     boolean existsBySlug(String slug);
 
     boolean existsByEmail(String email);

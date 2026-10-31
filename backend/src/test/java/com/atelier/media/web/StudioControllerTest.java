@@ -71,6 +71,9 @@ class StudioControllerTest {
     private DishService dishService;
 
     @MockBean
+    private com.atelier.media.service.RestaurantAccess restaurantAccess;
+
+    @MockBean
     private BrandingService brandingService;
 
     @MockBean

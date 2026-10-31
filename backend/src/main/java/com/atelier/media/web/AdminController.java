@@ -20,6 +20,7 @@ import com.atelier.media.dto.admin.TemporaryPasswordDto;
 import com.atelier.media.model.RestaurantStatus;
 import com.atelier.media.security.AdminPrincipal;
 import com.atelier.media.service.AdminService;
+import com.atelier.media.service.AdminAccess;
 import com.atelier.media.service.ModelRequestService;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
@@ -29,6 +30,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -47,15 +49,23 @@ import java.util.List;
 public class AdminController {
 
     private final AdminService adminService;
+    private final AdminAccess adminAccess;
     private final ModelRequestService modelRequestService;
     private final PublicMenuService publicMenuService;
 
-    public AdminController(AdminService adminService,
+    public AdminController(AdminService adminService, AdminAccess adminAccess,
                            ModelRequestService modelRequestService,
                            PublicMenuService publicMenuService) {
         this.adminService = adminService;
+        this.adminAccess = adminAccess;
         this.modelRequestService = modelRequestService;
         this.publicMenuService = publicMenuService;
+    }
+
+    /** Applies to every handler, including reads and model-publication operations. */
+    @ModelAttribute
+    public void requireAdminAccess(@AuthenticationPrincipal Jwt jwt) {
+        adminAccess.requireAccount(AdminPrincipal.from(jwt));
     }
 
     @GetMapping("/restaurants/{id}/menu-preview")

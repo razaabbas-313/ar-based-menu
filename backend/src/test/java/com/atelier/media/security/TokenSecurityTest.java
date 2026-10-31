@@ -42,6 +42,12 @@ class TokenSecurityTest {
     private AdminService adminService;
 
     @MockBean
+    private com.atelier.media.service.AdminAccess adminAccess;
+
+    @MockBean
+    private RestaurantAccess restaurantAccess;
+
+    @MockBean
     private com.atelier.media.service.PublicMenuService publicMenuService;
 
     @MockBean
@@ -94,7 +100,6 @@ class TokenSecurityTest {
 
         // Password change bumps token_version to 2
         restaurant.incrementTokenVersion(); // now 2
-        access.invalidate(10L); // cache invalidated
 
         // Token with version 1 is now rejected with InvalidTokenException
         assertThatThrownBy(() -> access.requireAccount(tenantV1))
@@ -122,7 +127,6 @@ class TokenSecurityTest {
         // Admin suspends restaurant -> status becomes SUSPENDED and token_version incremented
         restaurant.setStatus(RestaurantStatus.SUSPENDED);
         restaurant.incrementTokenVersion();
-        access.invalidate(10L);
 
         assertThatThrownBy(() -> access.requireAccount(tenant))
                 .isInstanceOf(InvalidTokenException.class);

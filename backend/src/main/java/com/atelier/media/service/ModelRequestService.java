@@ -508,7 +508,7 @@ public class ModelRequestService {
 
     private String resolveCategoryName(Media m) {
         if (m.getCategoryId() != null) {
-            return categoryRepository.findById(m.getCategoryId()).map(Category::getName).orElse(null);
+            return categoryRepository.findByIdAndRestaurantId(m.getCategoryId(), m.getRestaurantId()).map(Category::getName).orElse(null);
         }
         return m.getDishCategory() != null ? m.getDishCategory().name() : null;
     }

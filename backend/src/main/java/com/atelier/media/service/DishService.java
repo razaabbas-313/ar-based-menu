@@ -7,6 +7,7 @@ import com.atelier.media.dto.MediaResponseDto;
 import com.atelier.media.dto.ModelConfirmDto;
 import com.atelier.media.dto.PresignResponseDto;
 import com.atelier.media.exception.ConflictException;
+import com.atelier.media.exception.InvalidFieldException;
 import com.atelier.media.exception.MediaNotFoundException;
 import com.atelier.media.exception.UploadVerificationException;
 import com.atelier.media.model.Media;
@@ -96,6 +97,10 @@ public class DishService {
 
     public MediaResponseDto updateDish(Tenant tenant, long id, DishUpdateDto update) {
         Restaurant restaurant = restaurantAccess.requireStudioAccess(tenant);
+        if (update.categoryId() != null) {
+            categoryRepository.findByIdAndRestaurantId(update.categoryId(), tenant.restaurantId())
+                    .orElseThrow(() -> new InvalidFieldException("categoryId", "Category not found."));
+        }
         String tags = DietaryTags.toColumn(update.dietaryTags());
         Media saved = tx.execute(status -> {
             Media dish = requireCompletedDish(tenant, id);
@@ -121,7 +126,7 @@ public class DishService {
             return mediaRepository.save(dish);
         });
         menuCache.evict(restaurant.getSlug());
-        String catName = saved.getCategoryId() != null ? categoryRepository.findById(saved.getCategoryId()).map(com.atelier.media.model.Category::getName).orElse(null) : null;
+        String catName = saved.getCategoryId() != null ? categoryRepository.findByIdAndRestaurantId(saved.getCategoryId(), tenant.restaurantId()).map(com.atelier.media.model.Category::getName).orElse(null) : null;
         return DishMapper.toDto(saved, catName);
     }
 
