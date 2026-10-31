@@ -60,12 +60,38 @@ class ModelRequestServiceTest {
             h.storage,
             h.menuCache,
             objectMapper,
-            props
+            props, h.tx, h.restaurantAccess, mock(AdminAccess.class), mock(DurableCleanup.class)
     );
 
     @AfterEach
     void tearDown() {
         h.close();
+    }
+
+    private Media eligibleReferenceDish(String json) {
+        Media dish=TestFixtures.media(10L,1L,"bistro-a",UploadStatus.COMPLETED);
+        dish.setModelRequestStatus("COMPLETED");dish.setModelCompletedAt(Instant.now().minusSeconds(15*86400));dish.setModelRequestPhotos(json);
+        when(h.mediaRepository.findExpiredReferenceCandidates(org.mockito.ArgumentMatchers.anyLong(),any(Instant.class),any(Pageable.class))).thenReturn(List.of(dish));
+        when(h.mediaRepository.findByIdAndRestaurantIdForUpdate(10L,1L)).thenReturn(Optional.of(dish));return dish;
+    }
+    @Test void referenceExpiryReleasesMetadataWithoutSynchronousS3() {
+        Media dish=eligibleReferenceDish("[{\"s3Key\":\"a\"}]");
+        assertThat(service.cleanupReferencePhotos()).isOne();assertThat(dish.getModelRequestPhotos()).isEqualTo("[]");
+        verify(h.s3Client,org.mockito.Mockito.never()).deleteObjects(any(software.amazon.awssdk.services.s3.model.DeleteObjectsRequest.class));
+    }
+    @Test void activeHistoryPreventsReferenceRelease() {
+        Media dish=eligibleReferenceDish("[{\"s3Key\":\"a\"}]");
+        when(modelRequestRepository.findByDishIdOrderByRequestedAtDesc(10L)).thenReturn(List.of(ModelRequest.builder().status("PENDING").build()));
+        assertThat(service.cleanupReferencePhotos()).isZero();assertThat(dish.getModelRequestPhotos()).contains("a");
+    }
+    @Test void malformedReferenceMetadataIsNotErased() {
+        Media dish=eligibleReferenceDish("invalid-json");
+        assertThat(service.cleanupReferencePhotos()).isZero();
+        assertThat(dish.getModelRequestPhotos()).isEqualTo("invalid-json");
+    }
+    @Test void referenceEntriesWithoutKeysArePreservedForInvestigation() {
+        Media dish=eligibleReferenceDish("[{\"slot\":\"front\"}]");
+        assertThat(service.cleanupReferencePhotos()).isZero();assertThat(dish.getModelRequestPhotos()).contains("front");
     }
 
     @Test
@@ -181,6 +207,7 @@ class ModelRequestServiceTest {
         Restaurant r = TestFixtures.restaurant(1L, "bistro-a");
         Media d = TestFixtures.media(10L, 1L, "bistro-a", UploadStatus.COMPLETED);
         when(h.mediaRepository.findByIdAndRestaurantIdForUpdate(10L, 1L)).thenReturn(Optional.of(d));
+        when(h.mediaRepository.findByIdAndRestaurantId(10L,1L)).thenReturn(Optional.of(d));
         when(h.restaurantRepository.findById(1L)).thenReturn(Optional.of(r));
 
         ModelRequestConfirmDto.UploadedPhotoRef foreignPhoto = new ModelRequestConfirmDto.UploadedPhotoRef(
@@ -188,9 +215,9 @@ class ModelRequestServiceTest {
         );
         ModelRequestConfirmDto confirmDto = new ModelRequestConfirmDto(List.of(foreignPhoto), "notes");
 
-        assertThatThrownBy(() -> service.confirmRequest(1L, 10L, confirmDto))
+        assertThatThrownBy(() -> service.confirmRequest(new com.atelier.media.security.Tenant(1L,"bistro-a",false,1), 10L, confirmDto))
                 .isInstanceOf(InvalidMediaException.class)
-                .hasMessageContaining("does not belong to this restaurant's request path");
+                .hasMessageContaining("not currently issued");
     }
 
     @Test
@@ -198,6 +225,7 @@ class ModelRequestServiceTest {
         Restaurant r = TestFixtures.restaurant(1L, "bistro-a");
         Media d = TestFixtures.media(10L, 1L, "bistro-a", UploadStatus.COMPLETED);
         when(h.mediaRepository.findByIdAndRestaurantIdForUpdate(10L, 1L)).thenReturn(Optional.of(d));
+        when(h.mediaRepository.findByIdAndRestaurantId(10L,1L)).thenReturn(Optional.of(d));
         when(h.restaurantRepository.findById(1L)).thenReturn(Optional.of(r));
         when(pendingKeyRepository.findByRestaurantIdAndDishId(1L, 10L)).thenReturn(List.of()); // No issued keys!
 
@@ -206,9 +234,9 @@ class ModelRequestServiceTest {
         );
         ModelRequestConfirmDto confirmDto = new ModelRequestConfirmDto(List.of(unissuedPhoto), "notes");
 
-        assertThatThrownBy(() -> service.confirmRequest(1L, 10L, confirmDto))
+        assertThatThrownBy(() -> service.confirmRequest(new com.atelier.media.security.Tenant(1L,"bistro-a",false,1), 10L, confirmDto))
                 .isInstanceOf(InvalidMediaException.class)
-                .hasMessageContaining("was not issued for this dish request");
+                .hasMessageContaining("not currently issued");
     }
 
     @Test
@@ -330,8 +358,10 @@ class ModelRequestServiceTest {
     @Test
     void bucketPolicyExcludesPrivatePrefix() throws Exception {
         String policy = java.nio.file.Files.readString(java.nio.file.Path.of("../infra/s3-public-read-policy.json"));
-        assertThat(policy).contains("restaurant-atelier-private/*");
-        assertThat(policy).contains("\"Effect\": \"Deny\"");
+        // Private access relies on absence of an anonymous grant, not a Deny blocking the signer.
+        assertThat(policy).contains("YOUR_BUCKET_NAME/restaurant-atelier/*");
+        assertThat(policy).doesNotContain("restaurant-atelier-private/");
+        assertThat(policy).doesNotContain("\"Effect\": \"Deny\"");
     }
 
     @Test
@@ -348,7 +378,7 @@ class ModelRequestServiceTest {
 
         assertThatThrownBy(() -> service.approveModel(10L, foreignKeyDto, admin))
                 .isInstanceOf(InvalidMediaException.class)
-                .hasMessageContaining("does not belong to restaurant 'bistro-a'");
+                .hasMessageContaining("no longer issued");
     }
 
     @Test
@@ -359,6 +389,7 @@ class ModelRequestServiceTest {
         when(h.restaurantRepository.findById(1L)).thenReturn(Optional.of(r));
 
         String key = "restaurant-atelier/bistro-a/models/twin-oversize.glb";
+        d.setPendingModelS3Key(key);
         AdminModelApproveDto approveDto = new AdminModelApproveDto(key, "etag", "table");
         AdminPrincipal admin = new AdminPrincipal(99L, "admin@atelier.local");
 

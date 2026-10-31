@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
+@jakarta.persistence.EntityListeners(com.atelier.media.service.AssetCleanupListener.class)
 @Table(name = "media_details")
 @Getter
 @Setter
@@ -27,6 +28,9 @@ import java.time.Instant;
 @AllArgsConstructor
 @Builder
 public class Media {
+    @jakarta.persistence.Transient
+    private java.util.Set<String> cleanupSnapshot;
+
 
     public static final String PLACEMENT_TABLE = "table";
     public static final String PLACEMENT_FLOOR = "floor";

@@ -34,7 +34,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 
@@ -68,6 +67,12 @@ public class ModelRequestService {
     private final ObjectMapper objectMapper;
     private final AtelierProperties props;
 
+    private final org.springframework.transaction.support.TransactionTemplate tx;
+    private final RestaurantAccess restaurantAccess;
+    private final AdminAccess adminAccess;
+    private final DurableCleanup cleanup;
+    private final java.util.concurrent.atomic.AtomicLong referenceScanCursor=new java.util.concurrent.atomic.AtomicLong();
+
     public ModelRequestService(MediaRepository mediaRepository,
                                RestaurantRepository restaurantRepository,
                                CategoryRepository categoryRepository,
@@ -76,7 +81,9 @@ public class ModelRequestService {
                                S3Storage storage,
                                MenuCache menuCache,
                                ObjectMapper objectMapper,
-                               AtelierProperties props) {
+                               AtelierProperties props,
+                               org.springframework.transaction.support.TransactionTemplate tx,
+                               RestaurantAccess restaurantAccess, AdminAccess adminAccess, DurableCleanup cleanup) {
         this.mediaRepository = mediaRepository;
         this.restaurantRepository = restaurantRepository;
         this.categoryRepository = categoryRepository;
@@ -85,7 +92,7 @@ public class ModelRequestService {
         this.storage = storage;
         this.menuCache = menuCache;
         this.objectMapper = objectMapper;
-        this.props = props;
+        this.props = props; this.tx=tx; this.restaurantAccess=restaurantAccess; this.adminAccess=adminAccess; this.cleanup=cleanup;
     }
 
     public static String normalizeSlot(String slot) {
@@ -157,78 +164,66 @@ public class ModelRequestService {
         return out;
     }
 
-    /** Restaurant staff confirms submission of reference photos. Status becomes PENDING. */
-    @Transactional
-    public MediaResponseDto confirmRequest(Long restaurantId, Long dishId, ModelRequestConfirmDto dto) {
-        if (dto.photos() == null || dto.photos().isEmpty() || dto.photos().size() > 5) {
-            throw new InvalidMediaException("Must provide between 1 and 5 reference photos.");
+    /** HEAD is detached; publication rechecks current identity and the exact issued operation. */
+    public MediaResponseDto confirmRequest(com.atelier.media.security.Tenant tenant, Long dishId, ModelRequestConfirmDto dto) {
+        requireDetached();
+        Long restaurantId=tenant.restaurantId();
+        Restaurant before=restaurantAccess.requireStudioAccess(tenant);
+        if(dto.photos()==null || dto.photos().isEmpty() || dto.photos().size()>5) throw new InvalidMediaException("Must provide between 1 and 5 reference photos.");
+        Media snapshot=mediaRepository.findByIdAndRestaurantId(dishId,restaurantId).orElseThrow(()->new MediaNotFoundException(dishId));
+        var issued=pendingKeyRepository.findByRestaurantIdAndDishId(restaurantId,dishId);
+        Set<String> used=new HashSet<>(); Set<String> slots=new HashSet<>();
+        String prefix=storage.privateTenantPrefix(before.getSlug())+"requests/"+dishId+"/";
+        List<ModelRequestConfirmDto.UploadedPhotoRef> verifiedPhotos=new ArrayList<>();
+        for(var photo:dto.photos()) {
+            String slot=normalizeSlot(photo.slot());
+            if(photo.s3Key()==null || !photo.s3Key().startsWith(prefix) || !used.add(photo.s3Key()) || !ALLOWED_SLOTS.contains(slot) || !slots.add(slot) ||
+                issued.stream().noneMatch(k->k.getS3Key().equals(photo.s3Key()) && slot.equals(k.getSlot())) || cleanup.isRetired(photo.s3Key()))
+                throw new InvalidMediaException("Reference key is not currently issued for this request.");
+            var head=storage.head(storage.bucket(),photo.s3Key());
+            MediaRules.requireMaxSize(head.contentLength(),props.maxImageBytes(),"photo"); MediaRules.requireImage(MediaRules.normalizeContentType(head.contentType()));
+            verifiedPhotos.add(new ModelRequestConfirmDto.UploadedPhotoRef(slot,photo.s3Key(),storage.publicUrl(photo.s3Key())));
         }
-
-        Media dish = mediaRepository.findByIdAndRestaurantIdForUpdate(dishId, restaurantId)
-                .orElseThrow(() -> new MediaNotFoundException(dishId));
-
-        if ("PENDING".equalsIgnoreCase(dish.getModelRequestStatus()) || "IN_PRODUCTION".equalsIgnoreCase(dish.getModelRequestStatus())) {
-            throw new ConflictException("dishId", "A 3D model request is already in progress for this dish.");
-        }
-
-        Restaurant restaurant = restaurantRepository.findById(restaurantId)
-                .orElseThrow(() -> new RestaurantNotFoundException(restaurantId));
-
-        List<ModelRequestPendingKey> issuedKeys = pendingKeyRepository.findByRestaurantIdAndDishId(restaurantId, dishId);
-        Map<String, ModelRequestPendingKey> issuedMap = issuedKeys.stream()
-                .collect(Collectors.toMap(ModelRequestPendingKey::getS3Key, k -> k, (a, b) -> a));
-
-        String expectedPrefix = storage.privateTenantPrefix(restaurant.getSlug()) + "requests/" + dishId + "/";
-        List<ModelRequestConfirmDto.UploadedPhotoRef> verifiedPhotos = new ArrayList<>();
-
-        for (ModelRequestConfirmDto.UploadedPhotoRef photo : dto.photos()) {
-            if (photo.s3Key() == null || !photo.s3Key().startsWith(expectedPrefix)) {
-                throw new InvalidMediaException("S3 key '" + photo.s3Key() + "' does not belong to this restaurant's request path.");
+        return tx.execute(status -> {
+            Restaurant restaurant=restaurantRepository.findByIdForUpdate(restaurantId).orElseThrow(()->new RestaurantNotFoundException(restaurantId));
+            restaurantAccess.requireStudioAccess(tenant);
+            Media dish=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,restaurantId).orElseThrow(()->new MediaNotFoundException(dishId));
+            if(!java.util.Objects.equals(snapshot.getVersion(),dish.getVersion()) || !before.getSlug().equals(restaurant.getSlug()) ||
+                "PENDING".equals(dish.getModelRequestStatus()) || "IN_PRODUCTION".equals(dish.getModelRequestStatus())) throw new ConflictException("dishId","Request state changed; refresh before confirming.");
+            var fresh=pendingKeyRepository.findByRestaurantIdAndDishId(restaurantId,dishId);
+            for(var photo:verifiedPhotos) if(cleanup.isRetired(photo.s3Key()) || fresh.stream().noneMatch(k->k.getS3Key().equals(photo.s3Key()) && photo.slot().equals(k.getSlot())))
+                throw new ConflictException("dishId","Reference upload is no longer pending.");
+            String photosJson = "[]";
+            try {
+                photosJson = objectMapper.writeValueAsString(verifiedPhotos);
+                dish.setModelRequestPhotos(photosJson);
+            } catch (Exception e) {
+                throw new IllegalStateException("Cannot serialize verified references; publication was cancelled", e);
             }
-            if (!issuedMap.containsKey(photo.s3Key())) {
-                throw new InvalidMediaException("S3 key '" + photo.s3Key() + "' was not issued for this dish request.");
-            }
-            HeadObjectResponse head = storage.head(storage.bucket(), photo.s3Key());
-            MediaRules.requireMaxSize(head.contentLength(), props.maxImageBytes(), "photo");
-            String ct = MediaRules.normalizeContentType(head.contentType());
-            MediaRules.requireImage(ct);
+            dish.setModelRequestStatus("PENDING");
+            dish.setModelRequestNotes(dto.notes() != null ? dto.notes().strip() : null);
+            dish.setModelRequestedAt(Instant.now());
+            Media saved = mediaRepository.save(dish);
 
-            verifiedPhotos.add(new ModelRequestConfirmDto.UploadedPhotoRef(
-                    normalizeSlot(photo.slot()),
-                    photo.s3Key(),
-                    storage.publicUrl(photo.s3Key())
-            ));
-        }
+            String reqType = dish.hasModel() ? ModelRequest.TYPE_REPLACEMENT : ModelRequest.TYPE_NEW;
+            ModelRequest historyEntry = ModelRequest.builder()
+                    .restaurantId(restaurantId)
+                    .dishId(dishId)
+                    .status(ModelRequest.STATUS_PENDING)
+                    .requestType(reqType)
+                    .referencePhotos(photosJson)
+                    .notes(dish.getModelRequestNotes())
+                    .requestedAt(Instant.now())
+                    .build();
+            modelRequestRepository.save(historyEntry);
 
-        String photosJson = "[]";
-        try {
-            photosJson = objectMapper.writeValueAsString(verifiedPhotos);
-            dish.setModelRequestPhotos(photosJson);
-        } catch (Exception e) {
-            log.error("Failed to serialize model request photos", e);
-            dish.setModelRequestPhotos("[]");
-        }
-        dish.setModelRequestStatus("PENDING");
-        dish.setModelRequestNotes(dto.notes() != null ? dto.notes().strip() : null);
-        dish.setModelRequestedAt(Instant.now());
-        Media saved = mediaRepository.save(dish);
+            for(var abandoned:fresh) if(!used.contains(abandoned.getS3Key())) cleanup.record(restaurantId,storage.bucket(),abandoned.getS3Key(),"UNSELECTED_REFERENCE");
+            pendingKeyRepository.deleteByDishId(dishId);
 
-        String reqType = dish.hasModel() ? ModelRequest.TYPE_REPLACEMENT : ModelRequest.TYPE_NEW;
-        ModelRequest historyEntry = ModelRequest.builder()
-                .restaurantId(restaurantId)
-                .dishId(dishId)
-                .status(ModelRequest.STATUS_PENDING)
-                .requestType(reqType)
-                .referencePhotos(photosJson)
-                .notes(dish.getModelRequestNotes())
-                .requestedAt(Instant.now())
-                .build();
-        modelRequestRepository.save(historyEntry);
+            String categoryName = resolveCategoryName(saved);
+            return DishMapper.toDto(saved, categoryName);
 
-        pendingKeyRepository.deleteByDishId(dishId);
-
-        String categoryName = resolveCategoryName(saved);
-        return DishMapper.toDto(saved, categoryName);
+        });
     }
 
     /** Super Admin: list all dishes currently in the 3D production pipeline (capped at 200). */
@@ -275,107 +270,106 @@ public class ModelRequestService {
         Restaurant restaurant = restaurantRepository.findById(dish.getRestaurantId())
                 .orElseThrow(() -> new RestaurantNotFoundException(dish.getRestaurantId()));
         String s3Key = storage.newKey(restaurant.getSlug(), "models", "twin-", "glb");
+        tx.executeWithoutResult(status -> {
+            restaurantRepository.findByIdForUpdate(restaurant.getId()).orElseThrow();
+            Media current=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,restaurant.getId()).orElseThrow();
+            current.setPendingModelS3Key(s3Key); current.setPendingModelSizeBytes(request.uploadSizeBytes());
+            current.setPendingModelContentType(ct); current.setPendingModelCreatedAt(Instant.now());
+            mediaRepository.save(current);
+        });
         S3Storage.PresignedUpload upload = storage.presignPut(s3Key, request.contentType(), request.uploadSizeBytes());
         return new PresignResponseDto(upload.url(), s3Key, storage.publicUrl(s3Key), dishId,
                 upload.expiresAt(), upload.expiresInSeconds(), upload.requiredHeaders());
     }
 
-    /** Super Admin: attaches finished .glb, approves and marks 3D concierge request COMPLETED. */
-    @Transactional
+    /** Detached verification followed by locked, current-account publication. */
     public MediaResponseDto approveModel(Long dishId, AdminModelApproveDto dto, AdminPrincipal admin) {
-        storage.requireConfigured();
-        Media dish = mediaRepository.findById(dishId)
-                .orElseThrow(() -> new MediaNotFoundException(dishId));
-        Restaurant restaurant = restaurantRepository.findById(dish.getRestaurantId())
-                .orElseThrow(() -> new RestaurantNotFoundException(dish.getRestaurantId()));
+        requireDetached(); storage.requireConfigured(); adminAccess.requireAccount(admin);
+        Media snapshot=mediaRepository.findById(dishId).orElseThrow(()->new MediaNotFoundException(dishId));
+        Restaurant before=restaurantRepository.findById(snapshot.getRestaurantId()).orElseThrow();
+        if(dto.s3Key()==null || !dto.s3Key().startsWith(storage.tenantPrefix(before.getSlug())+"models/") ||
+            !dto.s3Key().equals(snapshot.getPendingModelS3Key()) || cleanup.isRetired(dto.s3Key())) throw new InvalidMediaException("Model upload is no longer issued for this dish.");
+        HeadObjectResponse head=storage.head(storage.bucket(),dto.s3Key());
+        MediaRules.requireMaxSize(head.contentLength(),props.maxPublishedModelBytes(),"3D model");
+        long modelSize=head.contentLength();
+        String ct=MediaRules.normalizeContentType(head.contentType());
+        if(!Set.of("model/gltf-binary","application/octet-stream","model/gltf+json").contains(ct)) throw new InvalidMediaException("Invalid model content type.");
+        return tx.execute(status -> {
+            Restaurant restaurant=restaurantRepository.findByIdForUpdate(snapshot.getRestaurantId()).orElseThrow();
+            adminAccess.requireAccountForUpdate(admin);
+            if(restaurant.isDeleted() || !restaurant.getStatus().canUseStudio()) throw new ConflictException("status","Restaurant is unavailable.");
+            Media dish=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,snapshot.getRestaurantId()).orElseThrow(()->new MediaNotFoundException(dishId));
+            if(!java.util.Objects.equals(snapshot.getVersion(),dish.getVersion()) || !before.getSlug().equals(restaurant.getSlug()) || !dto.s3Key().equals(dish.getPendingModelS3Key()) ||
+                !java.util.Objects.equals(snapshot.getModelRequestStatus(),dish.getModelRequestStatus()) || cleanup.isRetired(dto.s3Key()))
+                throw new ConflictException("dishId","Model publication state changed; refresh before retrying.");
+            if(dish.getPendingModelSizeBytes()!=null && dish.getPendingModelSizeBytes()!=modelSize) throw new InvalidMediaException("Model upload size changed.");
+            String oldModelKey = dish.getModelS3Key();
+            boolean isReplacement = oldModelKey != null && !oldModelKey.equals(dto.s3Key());
 
-        String expectedPrefix = storage.tenantPrefix(restaurant.getSlug()) + "models/";
-        if (!dto.s3Key().startsWith(expectedPrefix)) {
-            throw new InvalidMediaException("Model key '" + dto.s3Key() + "' does not belong to restaurant '" + restaurant.getSlug() + "'.");
-        }
+            long prevSize = dish.getModelFileSizeBytes() == null ? 0L : dish.getModelFileSizeBytes();
+            long delta = modelSize - prevSize;
+            int deltaModels = dish.hasModel() ? 0 : 1;
 
-        HeadObjectResponse head = storage.head(storage.bucket(), dto.s3Key());
-        long modelSize = head.contentLength();
-        if (modelSize > props.maxPublishedModelBytes()) {
-            throw new InvalidMediaException("3D model is %s; the limit is %s.".formatted(MediaRules.humanBytes(modelSize), MediaRules.humanBytes(props.maxPublishedModelBytes())));
-        }
-        String ct = MediaRules.normalizeContentType(head.contentType());
-        if (!"model/gltf-binary".equals(ct) && !"application/octet-stream".equals(ct) && !"model/gltf+json".equals(ct)) {
-            throw new InvalidMediaException("Invalid model content type: " + ct);
-        }
-
-        String oldModelKey = dish.getModelS3Key();
-        boolean isReplacement = oldModelKey != null && !oldModelKey.equals(dto.s3Key());
-
-        long prevSize = dish.getModelFileSizeBytes() == null ? 0L : dish.getModelFileSizeBytes();
-        long delta = modelSize - prevSize;
-        int deltaModels = dish.hasModel() ? 0 : 1;
-
-        dish.setModelS3Key(dto.s3Key());
-        dish.setModelS3Url(storage.publicUrl(dto.s3Key()));
-        dish.setModelFileSizeBytes(modelSize);
-        dish.setHasArSupport(true);
-        if (dto.arPlacement() != null && !dto.arPlacement().isBlank()) {
-            dish.setArPlacement(dto.arPlacement());
-        }
-        dish.setModelRequestStatus("COMPLETED");
-        dish.setModelCompletedAt(Instant.now());
-        Media saved = mediaRepository.save(dish);
-
-        Optional<ModelRequest> activeReq = modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId, ModelRequest.STATUS_PENDING);
-        if (activeReq.isEmpty()) {
-            activeReq = modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId, ModelRequest.STATUS_IN_PRODUCTION);
-        }
-        if (activeReq.isPresent()) {
-            ModelRequest req = activeReq.get();
-            req.setStatus(ModelRequest.STATUS_COMPLETED);
-            req.setCompletedModelKey(dto.s3Key());
-            req.setCompletedModelUrl(storage.publicUrl(dto.s3Key()));
-            req.setCompletedAt(Instant.now());
-            modelRequestRepository.save(req);
-        } else {
-            ModelRequest directReq = ModelRequest.builder()
-                    .restaurantId(restaurant.getId())
-                    .dishId(dishId)
-                    .status(ModelRequest.STATUS_COMPLETED)
-                    .requestType(ModelRequest.TYPE_NEW)
-                    .completedModelKey(dto.s3Key())
-                    .completedModelUrl(storage.publicUrl(dto.s3Key()))
-                    .requestedAt(Instant.now())
-                    .completedAt(Instant.now())
-                    .build();
-            modelRequestRepository.save(directReq);
-        }
-
-        List<ModelRequest> allReqs = modelRequestRepository.findByDishIdOrderByRequestedAtDesc(dishId);
-        Long currentReqId = activeReq.map(ModelRequest::getId).orElse(null);
-        for (ModelRequest r : allReqs) {
-            if (currentReqId != null && !r.getId().equals(currentReqId) && ModelRequest.STATUS_COMPLETED.equals(r.getStatus())) {
-                r.setStatus(ModelRequest.STATUS_SUPERSEDED);
-                if (isReplacement && oldModelKey != null && oldModelKey.equals(r.getCompletedModelKey())) {
-                    r.setNotes((r.getNotes() != null ? r.getNotes() + " " : "") + "[Model file replaced]");
-                }
-                modelRequestRepository.save(r);
+            dish.setPendingModelS3Key(null); dish.setPendingModelSizeBytes(null); dish.setPendingModelContentType(null); dish.setPendingModelCreatedAt(null);
+            dish.setModelS3Key(dto.s3Key());
+            dish.setModelS3Url(storage.publicUrl(dto.s3Key()));
+            dish.setModelFileSizeBytes(modelSize);
+            dish.setHasArSupport(true);
+            if (dto.arPlacement() != null && !dto.arPlacement().isBlank()) {
+                dish.setArPlacement(dto.arPlacement());
             }
-        }
+            dish.setModelRequestStatus("COMPLETED");
+            dish.setModelCompletedAt(Instant.now());
+            Media saved = mediaRepository.save(dish);
 
-        if (isReplacement) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    storage.deleteQuietly(oldModelKey);
+            Optional<ModelRequest> activeReq = modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId, ModelRequest.STATUS_PENDING);
+            if (activeReq.isEmpty()) {
+                activeReq = modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId, ModelRequest.STATUS_IN_PRODUCTION);
+            }
+            Long currentReqId;
+            if (activeReq.isPresent()) {
+                ModelRequest req = activeReq.get();
+                req.setStatus(ModelRequest.STATUS_COMPLETED);
+                req.setCompletedModelKey(dto.s3Key());
+                req.setCompletedModelUrl(storage.publicUrl(dto.s3Key()));
+                req.setCompletedAt(Instant.now());
+                currentReqId=modelRequestRepository.save(req).getId();
+            } else {
+                ModelRequest directReq = ModelRequest.builder()
+                        .restaurantId(restaurant.getId())
+                        .dishId(dishId)
+                        .status(ModelRequest.STATUS_COMPLETED)
+                        .requestType(isReplacement ? ModelRequest.TYPE_REPLACEMENT : ModelRequest.TYPE_NEW)
+                        .completedModelKey(dto.s3Key())
+                        .completedModelUrl(storage.publicUrl(dto.s3Key()))
+                        .requestedAt(Instant.now())
+                        .completedAt(Instant.now())
+                        .build();
+                currentReqId=modelRequestRepository.save(directReq).getId();
+            }
+
+            List<ModelRequest> allReqs = modelRequestRepository.findByDishIdOrderByRequestedAtDesc(dishId);
+            for (ModelRequest r : allReqs) {
+                if (currentReqId != null && !r.getId().equals(currentReqId) && ModelRequest.STATUS_COMPLETED.equals(r.getStatus())) {
+                    r.setStatus(ModelRequest.STATUS_SUPERSEDED);
+                    if (isReplacement && oldModelKey != null && oldModelKey.equals(r.getCompletedModelKey())) {
+                        r.setNotes((r.getNotes() != null ? r.getNotes() + " " : "") + "[Model file replaced]");
+                    }
+                    modelRequestRepository.save(r);
                 }
-            });
-        }
+            }
 
-        restaurantRepository.adjustUsage(restaurant.getId(), delta, 0, deltaModels);
-        menuCache.evict(restaurant.getSlug());
 
-        log.info("Admin {} approved 3D model for dish {} ({}) of restaurant {}",
-                admin.email(), dish.getDishTitle(), dish.getId(), restaurant.getSlug());
+            restaurantRepository.adjustUsage(restaurant.getId(), delta, 0, deltaModels);
+            menuCache.evict(restaurant.getSlug());
 
-        String categoryName = resolveCategoryName(saved);
-        return DishMapper.toDto(saved, categoryName);
+            log.info("Admin {} approved 3D model for dish {} ({}) of restaurant {}",
+                    admin.email(), dish.getDishTitle(), dish.getId(), restaurant.getSlug());
+
+            String categoryName = resolveCategoryName(saved);
+            return DishMapper.toDto(saved, categoryName);
+
+        });
     }
 
     /** Returns full 3D model request and completion history for a restaurant. */
@@ -443,31 +437,61 @@ public class ModelRequestService {
         return getAllHistory(restaurantId, null, 0, 50);
     }
 
-    /** Auto-cleanup: deletes reference photos from S3 for requests approved > 14 days ago. */
-    @Transactional
+    /** Release only eligible references; physical cleanup belongs to the durable worker. */
     public int cleanupReferencePhotos() {
-        Instant cutoff = Instant.now().minus(14, ChronoUnit.DAYS);
-        List<Media> completed = mediaRepository.findByModelRequestStatusAndModelCompletedAtBefore("COMPLETED", cutoff);
-        int cleanedCount = 0;
-
-        for (Media m : completed) {
-            if (m.getModelRequestPhotos() != null && !m.getModelRequestPhotos().isBlank() && !m.getModelRequestPhotos().equals("[]")) {
-                List<AdminModelRequestDto.PhotoSlotDto> photos = parsePhotos(m.getModelRequestPhotos());
-                List<String> keys = photos.stream().map(AdminModelRequestDto.PhotoSlotDto::s3Key).filter(k -> k != null && !k.isBlank()).toList();
-                if (!keys.isEmpty()) {
-                    try {
-                        storage.deleteKeys(storage.bucket(), keys);
-                        m.setModelRequestPhotos("[]");
-                        mediaRepository.save(m);
-                        cleanedCount++;
-                        log.info("Cleaned {} temporary reference photos for dish {}", keys.size(), m.getId());
-                    } catch (Exception e) {
-                        log.warn("Failed to delete reference photos for dish {}", m.getId(), e);
-                    }
+        requireDetached();
+        Instant cutoff=Instant.now().minus(14,ChronoUnit.DAYS);
+        var candidates=mediaRepository.findExpiredReferenceCandidates(referenceScanCursor.get(),cutoff,PageRequest.of(0,100));
+        if(candidates.isEmpty()) referenceScanCursor.set(0);
+        int scheduled=0;
+        for(Media candidate:candidates.stream().limit(100).toList()) {
+            try {
+            Integer changed=tx.execute(status -> {
+                restaurantRepository.findByIdForUpdate(candidate.getRestaurantId()).orElseThrow();
+                Media current=mediaRepository.findByIdAndRestaurantIdForUpdate(candidate.getId(),candidate.getRestaurantId()).orElseThrow();
+                if(!"COMPLETED".equals(current.getModelRequestStatus()) || current.getModelCompletedAt()==null || !current.getModelCompletedAt().isBefore(cutoff)) return 0;
+                Set<String> keys=AssetCleanupListener.photos(current.getModelRequestPhotos());
+                try {
+                    var raw=objectMapper.readTree(current.getModelRequestPhotos()==null?"[]":current.getModelRequestPhotos());
+                    for(var node:raw) if(!node.hasNonNull("s3Key") || node.path("s3Key").asText().isBlank()) return 0;
+                } catch(Exception e) { throw new IllegalStateException("Malformed references require manual repair"); }
+                if(keys.isEmpty()) return 0;
+                // History still retains models; references follow the already-approved 14-day expiry.
+                for(ModelRequest request:modelRequestRepository.findByDishIdOrderByRequestedAtDesc(current.getId())) {
+                    if(ModelRequest.STATUS_PENDING.equals(request.getStatus()) || ModelRequest.STATUS_IN_PRODUCTION.equals(request.getStatus())) return 0;
                 }
-            }
+                for(ModelRequest request:modelRequestRepository.findByDishIdOrderByRequestedAtDesc(current.getId())) {
+                    try {
+                        List<Map<String,String>> photos=objectMapper.readValue(request.getReferencePhotos()==null?"[]":request.getReferencePhotos(),new TypeReference<>(){});
+                        request.setReferencePhotos(objectMapper.writeValueAsString(photos.stream().filter(p->!keys.contains(p.get("s3Key"))).toList()));
+                    } catch(Exception e) { throw new IllegalStateException("Malformed reference history requires manual review"); }
+                    modelRequestRepository.save(request);
+                }
+                current.setModelRequestPhotos("[]"); mediaRepository.save(current); return 1;
+            });
+            scheduled+=changed==null?0:changed;
+            } catch(RuntimeException e) { log.warn("Reference expiry scheduling held for dish {} ({})",candidate.getId(),e.getClass().getSimpleName()); }
+            finally { referenceScanCursor.set(candidate.getId()); }
         }
-        return cleanedCount;
+        return scheduled;
+    }
+    public int expirePendingReferences() {
+        requireDetached();
+        int expired=0;
+        for(var pending:pendingKeyRepository.findTop100ByCreatedAtBefore(Instant.now().minus(props.presignTtl()).minus(Duration.ofHours(1)))) {
+            Boolean removed=tx.execute(status -> {
+                restaurantRepository.findByIdForUpdate(pending.getRestaurantId()).orElseThrow();
+                var current=pendingKeyRepository.findById(pending.getId());
+                if(current.isEmpty()) return false;
+                cleanup.record(pending.getRestaurantId(),storage.bucket(),pending.getS3Key(),"EXPIRED_REFERENCE_UPLOAD");
+                pendingKeyRepository.delete(current.get());return true;
+            });
+            if(Boolean.TRUE.equals(removed)) expired++;
+        }
+        return expired;
+    }
+    private static void requireDetached() {
+        if(TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("S3 workflow requires a detached transaction boundary");
     }
 
     private List<AdminModelRequestDto.PhotoSlotDto> parsePhotos(String json) {
@@ -476,7 +500,7 @@ public class ModelRequestService {
             List<Map<String, String>> raw = objectMapper.readValue(json, new TypeReference<>() {});
             return raw.stream().map(m -> {
                 String key = m.get("s3Key");
-                String url = (key != null && !key.isBlank()) ? storage.presignGet(key, Duration.ofMinutes(15)) : m.get("s3Url");
+                String url = (key != null && !key.isBlank()) ? storage.presignPrivateGet(key, Duration.ofMinutes(15)) : m.get("s3Url");
                 return new AdminModelRequestDto.PhotoSlotDto(
                         m.get("slot"),
                         key,
@@ -496,7 +520,7 @@ public class ModelRequestService {
                 Map<String, String> copy = new HashMap<>(m);
                 String key = copy.get("s3Key");
                 if (key != null && !key.isBlank()) {
-                    copy.put("s3Url", storage.presignGet(key, Duration.ofMinutes(15)));
+                    copy.put("s3Url", storage.presignPrivateGet(key, Duration.ofMinutes(15)));
                 }
                 return copy;
             }).toList();

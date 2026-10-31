@@ -69,7 +69,7 @@ In AWS Console -> **S3** -> Your Bucket -> **Permissions** tab -> **Cross-origin
 *(If you have a custom domain on Vercel like `https://menu.yourdomain.com`, add it to `AllowedOrigins` as well).*
 
 ### B. Bucket Public Read Policy
-Under **Permissions** tab -> **Bucket Policy**:
+Example only: no policy has been deployed or AWS access tested by Milestone B1. Review the assumptions below before applying anything. The authoritative local templates are [s3-public-read-policy.json](infra/s3-public-read-policy.json) and [iam-policy.json](infra/iam-policy.json).
 
 ```json
 {
@@ -80,12 +80,34 @@ Under **Permissions** tab -> **Bucket Policy**:
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::atelier-ar-bucket/restaurant-atelier/*"
+      "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/restaurant-atelier/*"
     }
   ]
 }
 ```
-*(Replace `atelier-ar-bucket` with your actual bucket name. The `restaurant-atelier-private/*` prefix remains private and inaccessible to guests).*
+Replace `YOUR_BUCKET_NAME` only in a separately approved environment. The examples assume one application IAM principal in the **same AWS account** as the bucket, no other grants or ACLs exposing private objects, and the default configured roots. This is not a verified production arrangement. If roots are customized, adjust both policies to match; never use a bucket-wide wildcard as a shortcut.
+
+### C. Application permissions and private references
+
+Attach the reviewed identity policy example to the intended application principal, not to anonymous guests. It grants only PutObject, GetObject and DeleteObject under `restaurant-atelier/*` and `restaurant-atelier-private/*`. GetObject permission also supports HEAD; there is no separate `s3:HeadObject` IAM action. ListBucket uses the bucket ARN and `s3:prefix` conditions limited to these two roots, not object ARNs or unrestricted bucket listing. Private listing supports a future approved managed-prefix cleanup operation; it does not mean that complete private cleanup is currently implemented. No bucket administration, ACL changes, version deletion or unrelated-prefix permissions are granted.
+
+The bucket example grants anonymous GetObject only under the public root. It contains **no anonymous private Allow**. Private references rely on default denial in the assumed policy arrangement; do not add another policy/ACL that exposes them. The old unconditional private GetObject Deny was removed because it denied the application's signer as well. Applicable explicit Deny statements still override an Allow, including when a URL is presigned. Review all applicable policies before concluding access is possible.
+
+Browser PUTs remain direct to S3, with the exact signed Content-Type, length and browser-settable headers. Authorized reference readers receive temporary presigned GETs using the application's permissions; a signature is not an authorization override. Preserve ETag exposure in CORS. CORS controls browser behavior, not anonymous/private authorization. Presigned URLs are bearer capabilities and can be reused until expiry; existing metadata validation is not binary-content validation.
+
+Block Public Access settings at organization/account/bucket/access-point levels can prevent the intended anonymous public read. Do not disable all safeguards to resolve a 403. Review the effective settings and keep ACL-based public access blocked where compatible. KMS encryption may require separately scoped KMS permissions and a compatible key policy; no KMS rights are invented here. Cross-account use requires separately reviewed identity/resource/trust policies. **Stop deployment if principal, KMS, Block Public Access or cross-account requirements are unknown**; these local templates do not resolve unknown production settings.
+
+### D. Future nonproduction verification — separate approval required
+
+Use a dedicated disposable bucket, synthetic public/private objects and a narrowly scoped test identity after the bucket, region, principal, budget and cleanup actions are explicitly approved. An isolated prefix in a production bucket does not safely isolate bucket-policy or Block Public Access changes.
+
+Verify authorized private PUT/HEAD/GET/DELETE, anonymous private GET denial, intended anonymous public GET, rejection of unrelated/lookalike prefixes, scoped listing, expired signatures and signed browser headers/CORS. Record sanitized statuses, not credentials or signed URLs. Local `S3PolicyTemplateTest` assertions parse JSON and verify static template scope; they are **not AWS IAM evaluation or deployed access tests**. No AWS validation is performed by B1. B2+B3 now implement private cache signing and truthful deletion results locally; [sprint results](project-documentation/SPRINT_B2_B3_RESULTS.md) describe verification and remaining lifecycle limits. Granting permission alone does not fix lifecycle or retention defects.
+
+New private PUTs require the signed `Cache-Control: private, no-store` header; existing browser upload code already sends the required headers. Private reference GETs include a signed response-cache-control override, including explicitly keyed historical references. Public PUTs retain immutable caching. Existing object metadata, old signed URLs, previously cached copies and unkeyed legacy fallback URLs are not retroactively repaired. Review them separately in an approved nonproduction environment; do not copy objects or invalidate live caches under this sprint.
+
+Deletion outcomes are S3 acknowledgements, explicit failures or unknown outcomes; an incomplete prefix listing is never complete success. Acknowledgement does not prove purge of historical versions/delete markers. Single-object cleanup remains best effort, and replacement/expiry/hard-deletion crash recovery is not durable until B4. Never interpret deleted database rows or cleanup-request counts as physical purge evidence.
+
+Local regression command from `backend/`: `mvn -o '-Dtest=S3PolicyTemplateTest' test` (requires already cached dependencies). The suite checks JSON parsing, public-only anonymous grants, absence of the old signer-blocking Deny, bounded object actions/resources, bucket-prefix listing conditions and unrelated/lookalike-prefix exclusion. It does not load AWS credentials or contact AWS. Public-prefix access is prefix-wide, including known pending-object keys; database publication/privacy state is not an S3 authorization boundary.
 
 ---
 

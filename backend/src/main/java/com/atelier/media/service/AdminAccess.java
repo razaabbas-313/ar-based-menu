@@ -16,6 +16,10 @@ public class AdminAccess {
         this.users = users;
     }
 
+    public PlatformUser requireAccountForUpdate(AdminPrincipal principal) {
+        users.findByIdForUpdate(principal.adminId()).orElseThrow(() -> new InvalidTokenException("This admin account no longer exists."));
+        return requireAccount(principal);
+    }
     public PlatformUser requireAccount(AdminPrincipal principal) {
         PlatformUser admin = users.findById(principal.adminId())
                 .orElseThrow(() -> new InvalidTokenException("This admin account no longer exists. Please sign in again."));

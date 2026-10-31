@@ -150,7 +150,6 @@ public class MediaService {
         Long actualSize = head.contentLength();
         if (actualSize == null || !actualSize.equals(media.getFileSizeBytes())) {
             markFailed(media.getId());
-            storage.deleteQuietly(media.getS3Bucket(), media.getS3Key());
             throw new UploadVerificationException("Size mismatch: expected %d bytes but S3 holds %s bytes."
                     .formatted(media.getFileSizeBytes(), actualSize));
         }
@@ -232,9 +231,6 @@ public class MediaService {
             }
         } catch (OptimisticLockingFailureException e) {
             log.info("Stale-upload sweep skipped this round: {}", e.getMessage());
-        }
-        for (StoredObject object : orphans) {
-            storage.deleteQuietly(object.bucket(), object.key());
         }
         return orphans.size();
     }

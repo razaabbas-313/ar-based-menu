@@ -90,7 +90,8 @@ public interface MediaRepository extends JpaRepository<Media, Long> {
 
     List<Media> findTop5ByRestaurantIdAndUploadStatusOrderByViewsCountDesc(Long restaurantId, UploadStatus status);
 
-    List<Media> findByModelRequestStatusAndModelCompletedAtBefore(String status, Instant cutoff);
+    @Query("select m from Media m where m.id>:after and m.modelRequestStatus='COMPLETED' and m.modelCompletedAt<:cutoff and m.modelRequestPhotos is not null and m.modelRequestPhotos<>'' and m.modelRequestPhotos<>'[]' order by m.id")
+    List<Media> findExpiredReferenceCandidates(@Param("after") long after, @Param("cutoff") Instant cutoff, org.springframework.data.domain.Pageable pageable);
 
     @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true)
     @Query("UPDATE Media m SET m.viewsCount = m.viewsCount + 1 WHERE m.id = :id")

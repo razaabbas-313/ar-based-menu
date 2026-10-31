@@ -47,6 +47,7 @@ import java.util.UUID;
 public class S3Storage {
 
     private static final String IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+    private static final String PRIVATE_CACHE_CONTROL = "private, no-store";
     private static final int DELETE_BATCH = 1000;
 
     private final S3Presigner presigner;
@@ -100,9 +101,19 @@ public class S3Storage {
 
     /** Presigns a GET URL with custom TTL (e.g. 15 minutes) for private assets without reading bytes into RAM. */
     public String presignGet(String key, Duration duration) {
+        return presignGet(key, duration, isPrivateKey(key) ? PRIVATE_CACHE_CONTROL : null);
+    }
+
+    /** Explicit private purpose also protects reference keys retained under an earlier prefix. */
+    public String presignPrivateGet(String key, Duration duration) {
+        return presignGet(key, duration, PRIVATE_CACHE_CONTROL);
+    }
+
+    private String presignGet(String key, Duration duration, String cacheControl) {
         GetObjectRequest get = GetObjectRequest.builder()
                 .bucket(bucket())
                 .key(key)
+                .responseCacheControl(cacheControl)
                 .build();
         PresignedGetObjectRequest presigned = presigner.presignGetObject(GetObjectPresignRequest.builder()
                 .signatureDuration(duration)
@@ -118,7 +129,7 @@ public class S3Storage {
                 .key(key)
                 .contentType(contentType)
                 .contentLength(sizeBytes)
-                .cacheControl(IMMUTABLE_CACHE_CONTROL)
+                .cacheControl(isPrivateKey(key) ? PRIVATE_CACHE_CONTROL : IMMUTABLE_CACHE_CONTROL)
                 .build();
         PresignedPutObjectRequest presigned = presigner.presignPutObject(PutObjectPresignRequest.builder()
                 .signatureDuration(props.presignTtl())
@@ -146,55 +157,97 @@ public class S3Storage {
         return head(bucket(), key);
     }
 
-    public void deleteQuietly(String bucket, String key) {
+    public S3DeletionResult deleteBestEffort(String bucket, String key) {
         if (key == null || key.isBlank()) {
-            return;
+            return S3DeletionResult.empty();
         }
+        S3DeletionResult result;
         try {
-            client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+            var response = client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+            result = response == null
+                    ? new S3DeletionResult(Set.of(), Map.of(), Set.of(key), true)
+                    : new S3DeletionResult(Set.of(key), Map.of(), Set.of(), true);
         } catch (SdkException e) {
-            log.warn("Could not delete s3://{}/{}: {}", bucket, key, e.getMessage());
+            result = deletionException(List.of(key), e);
         }
+        if (!result.complete()) log.warn("S3 single-object cleanup incomplete: {}", result);
+        return result;
     }
 
-    public void deleteQuietly(String key) {
-        deleteQuietly(bucket(), key);
+    public S3DeletionResult deleteBestEffort(String key) {
+        return deleteBestEffort(bucket(), key);
     }
 
-    /** Batch delete (1000 keys per request). Returns the number of keys submitted. */
-    public int deleteKeys(String bucket, Collection<String> keys) {
+    /** Quiet-mode success acknowledges requested keys except explicit per-object errors. */
+    public S3DeletionResult deleteKeys(String bucket, Collection<String> keys) {
         Set<String> unique = new LinkedHashSet<>();
         keys.stream().filter(k -> k != null && !k.isBlank()).forEach(unique::add);
         List<String> all = new ArrayList<>(unique);
+        List<S3DeletionResult> outcomes = new ArrayList<>();
         for (int i = 0; i < all.size(); i += DELETE_BATCH) {
-            List<ObjectIdentifier> batch = all.subList(i, Math.min(all.size(), i + DELETE_BATCH)).stream()
+            List<String> batchKeys = all.subList(i, Math.min(all.size(), i + DELETE_BATCH));
+            List<ObjectIdentifier> batch = batchKeys.stream()
                     .map(k -> ObjectIdentifier.builder().key(k).build())
                     .toList();
             try {
-                client.deleteObjects(DeleteObjectsRequest.builder()
+                var response = client.deleteObjects(DeleteObjectsRequest.builder()
                         .bucket(bucket)
                         .delete(Delete.builder().objects(batch).quiet(true).build())
+                        .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofMinutes(2)))
                         .build());
+                if (response == null || response.errors().stream().anyMatch(error -> !batchKeys.contains(error.key()))) {
+                    outcomes.add(new S3DeletionResult(Set.of(), Map.of(), Set.copyOf(batchKeys), true));
+                    continue;
+                }
+                Map<String, String> failed = new LinkedHashMap<>();
+                response.errors().forEach(error -> failed.put(error.key(), error.code() == null ? "Unspecified" : error.code()));
+                Set<String> deleted = new LinkedHashSet<>(batchKeys);
+                deleted.removeAll(failed.keySet());
+                outcomes.add(new S3DeletionResult(deleted, failed, Set.of(), true));
             } catch (SdkException e) {
-                log.warn("Batch delete of {} object(s) in {} failed: {}", batch.size(), bucket, e.getMessage());
+                outcomes.add(deletionException(batchKeys, e));
             }
         }
-        return all.size();
+        S3DeletionResult result = S3DeletionResult.combine(outcomes);
+        if (!result.complete()) log.warn("S3 bulk cleanup incomplete: {}", result);
+        return result;
     }
 
     /** Lists every object under {@code prefix} and deletes them. Requires s3:ListBucket. */
-    public int deletePrefix(String bucket, String prefix) {
+    public S3DeletionResult deletePrefix(String bucket, String prefix) {
+        if (prefix == null || prefix.isBlank()) throw new IllegalArgumentException("A nonempty cleanup prefix is required");
         List<String> keys = new ArrayList<>();
+        List<S3DeletionResult> outcomes = new ArrayList<>();
         try {
             for (S3Object object : client.listObjectsV2Paginator(
                     ListObjectsV2Request.builder().bucket(bucket).prefix(prefix).build()).contents()) {
                 keys.add(object.key());
+                if (keys.size() == DELETE_BATCH) {
+                    outcomes.add(deleteKeys(bucket, keys));
+                    keys.clear();
+                }
             }
         } catch (SdkException e) {
-            log.warn("Could not list s3://{}/{} (grant s3:ListBucket to sweep whole folders): {}", bucket, prefix, e.getMessage());
-            return 0;
+            log.warn("S3 prefix listing incomplete; cleanup is not acknowledged as complete ({})", e.getClass().getSimpleName());
+            outcomes.add(new S3DeletionResult(Set.of(), Map.of(), Set.of(), false));
         }
-        return deleteKeys(bucket, keys);
+        outcomes.add(deleteKeys(bucket, keys));
+        return S3DeletionResult.combine(outcomes);
+    }
+
+    private S3DeletionResult deletionException(Collection<String> keys, SdkException error) {
+        if (error instanceof S3Exception s3 && s3.statusCode() >= 400 && s3.statusCode() < 500 && s3.statusCode() != 408) {
+            log.warn("S3 deletion request rejected: status={} requested={}", s3.statusCode(), keys.size());
+            Map<String, String> failures = new LinkedHashMap<>();
+            keys.forEach(key -> failures.put(key, "HTTP_" + s3.statusCode()));
+            return new S3DeletionResult(Set.of(), failures, Set.of(), true);
+        }
+        log.warn("S3 deletion request outcome unknown: errorType={}", error.getClass().getSimpleName());
+        return new S3DeletionResult(Set.of(), Map.of(), Set.copyOf(keys), true);
+    }
+
+    private boolean isPrivateKey(String key) {
+        return key.startsWith(trimSlashes(props.privateKeyPrefix()) + "/");
     }
 
     private static UploadVerificationException notUploaded(String key) {

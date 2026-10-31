@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Presigned URLs that were never confirmed (closed tab, lost signal) are marked FAILED so the
- * table stays truthful, and any orphaned object is removed from the bucket.
+ * table stays truthful, with cleanup intent committed in the same transaction.
  * Also performs scheduled cleanup of temporary 3D reference photos 14 days after model approval.
  */
 @Slf4j
@@ -23,19 +23,20 @@ public class StaleUploadReaper {
         try {
             int expired = mediaService.expireStalePresignedUploads();
             if (expired > 0) {
-                log.info("Marked {} unconfirmed presigned upload(s) as FAILED", expired);
+                log.info("Expired {} pending upload record(s); physical S3 cleanup may remain incomplete", expired);
             }
         } catch (RuntimeException e) {
-            log.warn("Stale-upload sweep failed; will retry next run", e);
+            log.warn("Stale-upload sweep failed; will retry next run ({})", e.getClass().getSimpleName());
         }
 
         try {
+            modelRequestService.expirePendingReferences();
             int cleaned = modelRequestService.cleanupReferencePhotos();
             if (cleaned > 0) {
-                log.info("Cleaned temporary 3D reference photos for {} approved dish(es)", cleaned);
+                log.info("Scheduled durable reference cleanup for {} approved dish(es)", cleaned);
             }
         } catch (RuntimeException e) {
-            log.warn("3D reference photo sweep failed; will retry next run", e);
+            log.warn("Reference scheduling failed; will retry next run ({})", e.getClass().getSimpleName());
         }
     }
 }

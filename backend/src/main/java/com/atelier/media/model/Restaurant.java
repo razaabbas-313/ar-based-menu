@@ -20,6 +20,7 @@ import java.time.Instant;
 
 /** A tenant: one owner account, its branding, lifecycle status and usage counters. */
 @Entity
+@jakarta.persistence.EntityListeners(com.atelier.media.service.AssetCleanupListener.class)
 @Table(name = "restaurants")
 @Getter
 @Setter
@@ -27,6 +28,9 @@ import java.time.Instant;
 @AllArgsConstructor
 @Builder
 public class Restaurant {
+    @jakarta.persistence.Transient
+    private java.util.Set<String> cleanupSnapshot;
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

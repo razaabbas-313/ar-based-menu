@@ -168,7 +168,7 @@ class MediaServiceTest {
                 .isInstanceOf(UploadVerificationException.class);
 
         assertThat(aUpload.getUploadStatus()).isEqualTo(UploadStatus.FAILED);
-        verify(h.s3Client).deleteObject(any(DeleteObjectRequest.class));
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
         verify(h.restaurantRepository, never()).adjustUsage(anyLong(), anyLong(), anyInt(), anyInt());
     }
 
@@ -191,7 +191,7 @@ class MediaServiceTest {
         assertThat(pendingModel.getUploadStatus()).isEqualTo(UploadStatus.COMPLETED);
         InOrder order = inOrder(h.txManager, h.s3Client);
         order.verify(h.txManager, org.mockito.Mockito.times(3)).commit(any());
-        order.verify(h.s3Client, org.mockito.Mockito.times(2)).deleteObject(any(DeleteObjectRequest.class));
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     private static PresignRequestDto photo(String filename, List<String> tags) {

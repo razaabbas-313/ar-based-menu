@@ -105,7 +105,7 @@ class DishServiceTest {
         order.verify(h.mediaRepository).delete(dish);
         order.verify(h.restaurantRepository).adjustUsage(A, -5_100L, -1, -1);
         order.verify(h.txManager).commit(any());
-        order.verify(h.s3Client, times(2)).deleteObject(any(DeleteObjectRequest.class));
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
         assertThat(h.cached("bistro-a")).isFalse();
         assertThat(h.cached("bistro-b")).isTrue();
     }
@@ -161,8 +161,7 @@ class DishServiceTest {
         InOrder order = inOrder(h.restaurantRepository, h.txManager, h.s3Client);
         order.verify(h.restaurantRepository).adjustUsage(A, 3_000L, 0, 0);
         order.verify(h.txManager).commit(any());
-        order.verify(h.s3Client).deleteObject(deleted.capture());
-        assertThat(deleted.getValue().key()).isEqualTo(oldKey);
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test
@@ -187,7 +186,7 @@ class DishServiceTest {
         assertThat(dto.is3d()).isFalse();
         assertThat(dto.imageUrl()).endsWith(".webp");
         verify(h.restaurantRepository).adjustUsage(A, -5_000L, 0, -1);
-        verify(h.s3Client).deleteObject(any(DeleteObjectRequest.class));
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test

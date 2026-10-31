@@ -113,8 +113,7 @@ class MediaReplacementServiceTest {
         service.presign(TENANT_A, 22L, photo(2_000L));
 
         ArgumentCaptor<DeleteObjectRequest> deleted = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-        verify(h.s3Client).deleteObject(deleted.capture());
-        assertThat(deleted.getValue().key()).isEqualTo("restaurant-atelier/bistro-a/image-2d/abandoned.webp");
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test
@@ -155,8 +154,7 @@ class MediaReplacementServiceTest {
         order.verify(h.txManager).getTransaction(any());
         order.verify(h.restaurantRepository).adjustUsage(A, 380_000L - 100L, 0, 0);
         order.verify(h.txManager).commit(any());
-        order.verify(h.s3Client).deleteObject(deleted.capture());
-        assertThat(deleted.getValue().key()).isEqualTo(oldKey);
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
 
         // Only this restaurant's menu entry is evicted.
         assertThat(h.cached("bistro-a")).isFalse();
@@ -178,8 +176,7 @@ class MediaReplacementServiceTest {
         assertThat(dish.getS3Key()).isEqualTo(live);
         assertThat(dish.getPendingImageS3Key()).isNull();
         ArgumentCaptor<DeleteObjectRequest> deleted = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-        verify(h.s3Client).deleteObject(deleted.capture());
-        assertThat(deleted.getValue().key()).isEqualTo(newKey);
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
         verify(h.restaurantRepository, never()).adjustUsage(anyLong(), anyLong(), anyInt(), anyInt());
         assertThat(h.cached("bistro-a")).isTrue();
     }
@@ -265,7 +262,7 @@ class MediaReplacementServiceTest {
 
         assertThat(dish.getModelS3Key()).isEqualTo(presign.objectKey());
         verify(h.restaurantRepository).adjustUsage(A, 3_000L, 0, 0);
-        verify(h.s3Client, times(1)).deleteObject(any(DeleteObjectRequest.class)); // the replaced .glb
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class)); // durable worker owns cleanup
     }
 
     // ---------------------------------------------------------------- helpers
