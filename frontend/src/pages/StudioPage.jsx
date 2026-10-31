@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, ChefHat, FolderPlus, FolderUp, LayoutList, LogIn, Menu, Palette, PlusCircle, ShieldAlert, TriangleAlert, X } from 'lucide-react';
 import Navbar from '../components/Navbar.jsx';
+import ExperienceManager from '../components/studio/ExperienceManager.jsx';
+import OwnerPlanOverview from '../components/studio/OwnerPlanOverview.jsx';
 import StudioTopBar from '../components/studio/StudioTopBar.jsx';
 import DishManager from '../components/studio/DishManager.jsx';
 import NewDishStudio from '../components/studio/NewDishStudio.jsx';
@@ -16,6 +18,8 @@ import { buzz, cx } from '../utils/format.js';
 import { navigate, useLocation } from '../utils/router.js';
 
 const TABS = [
+  { key: 'experience', label: 'Tables & WhatsApp', short: 'Guest setup', icon: Menu },
+  { key: 'plan', label: 'Your plan', short: 'Plan', icon: ShieldAlert },
   { key: 'dishes', label: 'Dish Management', short: 'Dishes', icon: LayoutList },
   { key: 'batch', label: 'Batch Upload', short: 'Batch', icon: FolderUp },
   { key: 'new', label: 'New Dish Studio', short: 'New dish', icon: PlusCircle },
@@ -58,6 +62,7 @@ function Studio() {
   const { query } = useLocation();
   const tab = TABS.some((t) => t.key === query.get('tab')) ? query.get('tab') : 'dishes';
   const [settings, setSettings] = useState(null);
+  const [policy, setPolicy] = useState(null);
   const [settingsError, setSettingsError] = useState(null);
   const [dishes, setDishes] = useState([]);
   const [dishState, setDishState] = useState({ loading: true, error: '' });
@@ -67,16 +72,20 @@ function Studio() {
 
   const loadSettings = useCallback(() => {
     setSettingsError(null);
-    api
-      .settings()
-      .then((s) => {
-        setSettings(s);
-        if (s && s.canUpload3d !== undefined) {
-          updateRestaurant?.({ canUpload3d: s.canUpload3d });
-        }
+    Promise.all([api.settings(), api.ownerEntitlements()])
+      .then(([s, effective]) => {
+        const allowed=Boolean(effective.operational['model.ownerUpload']);
+        setPolicy(effective);setSettings({ ...s, canUpload3d: allowed });
+        updateRestaurant?.({ canUpload3d: allowed });
       })
       .catch((e) => setSettingsError(e));
   }, [updateRestaurant]);
+
+  useEffect(() => {
+    if(!policy?.nextReevaluationAt)return;
+    const timer=setTimeout(loadSettings,Math.min(2147483000,Math.max(100,new Date(policy.nextReevaluationAt).getTime()-Date.now()+100)));
+    return ()=>clearTimeout(timer);
+  },[policy?.nextReevaluationAt,loadSettings]);
 
   const loadDishes = useCallback(() => {
     setDishState({ loading: true, error: '' });
@@ -142,7 +151,7 @@ function Studio() {
 
   return (
     <div className="min-h-screen pb-24">
-      <StudioTopBar settings={settings} />
+      <StudioTopBar settings={settings} qrAllowed={Boolean(policy?.operational['qr.venue'])} />
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="py-4">
           {/* Desktop Tab Navigation */}
@@ -245,7 +254,8 @@ function Studio() {
               onDishes={updateDishes}
               onNewDish={() => go('new')}
               onReload={loadDishes}
-              canUpload3d={settings?.canUpload3d !== undefined ? settings.canUpload3d : restaurant?.canUpload3d}
+              conciergeAllowed={Boolean(policy?.operational['model.concierge'])}
+              canUpload3d={Boolean(policy?.operational['model.ownerUpload'])}
             />
           )}
           {tab === 'batch' && (
@@ -263,7 +273,8 @@ function Studio() {
               onPublished={(dish) => updateDishes((list) => [dish, ...list.filter((d) => d.id !== dish.id)])}
             />
           )}
-          {tab === 'brand' &&
+          {tab === 'brand' && !policy?.operational['branding.enabled'] && <p className="rounded-2xl border border-amber-400/20 p-6 text-sm text-zinc-400">Brand customization is unavailable under your current policy. View Your plan for details.</p>}
+          {tab === 'brand' && policy?.operational['branding.enabled'] &&
             (settings ? (
               <BrandCustomizer
                 key={settings.branding.id}
@@ -276,6 +287,8 @@ function Studio() {
                 <Spinner />
               </div>
             ))}
+          {tab === 'experience' && <ExperienceManager restaurant={restaurant} />}
+          {tab === 'plan' && <OwnerPlanOverview />}
           {tab === 'analytics' && <StudioAnalytics />}
         </main>
       </div>

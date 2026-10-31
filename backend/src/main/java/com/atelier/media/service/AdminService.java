@@ -54,6 +54,10 @@ import java.util.Set;
 @Slf4j
 @Service
 public class AdminService {
+    private EntitlementService entitlements;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
+
 
     private static final Map<String, String> SORTABLE = Map.of(
             "name", "name", "createdAt", "createdAt", "storage", "storageUsedBytes",
@@ -213,6 +217,7 @@ public class AdminService {
         try {
             saved = tx.execute(s -> {
                 Restaurant r = restaurantRepository.saveAndFlush(restaurant);
+                if(entitlements!=null)entitlements.provision(r.getId(),dto.planRevisionId(),dto.initialOverrides(),admin);
                 audit(admin, "CREATE", r.getId(), "Provisioned /r/" + r.getSlug() + " (" + r.getStatus() + ") with a temporary password");
                 return r;
             });
@@ -278,6 +283,7 @@ public class AdminService {
                 r.setAdminNotes(dto.adminNotes().strip());
             }
             if (dto.canUpload3d() != null) {
+                if(entitlements!=null)entitlements.setOwnerUploadGrant(id,dto.canUpload3d(),admin);
                 r.setCanUpload3d(dto.canUpload3d());
             }
             Restaurant updated = restaurantRepository.save(r);
@@ -302,6 +308,7 @@ public class AdminService {
     public AdminRestaurantDto update3dPermission(long id, boolean canUpload3d, AdminPrincipal admin) {
         Restaurant saved = tx.execute(s -> {
             Restaurant r = require(id);
+            if(entitlements!=null)entitlements.setOwnerUploadGrant(id,canUpload3d,admin);
             r.setCanUpload3d(canUpload3d);
             Restaurant updated = restaurantRepository.save(r);
             audit(admin, "UPDATE_3D_PERMISSION", id, "Direct 3D model upload permission set to: " + canUpload3d);

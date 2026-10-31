@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { WifiOff } from 'lucide-react';
-import { loadModelViewer } from '../utils/modelViewer.js';
+import { loadModelViewer, setViewerFlags } from '../utils/modelViewer.js';
 
 export const AR_MODES = 'webxr scene-viewer quick-look';
 
@@ -24,6 +24,7 @@ export default function ModelStage({
   alt,
   variant = 'card',
   arPlacement = 'table',
+  arEnabled = true,
   autoRotate = true,
   exposure = 1,
   shadow = 1.1,
@@ -41,6 +42,9 @@ export default function ModelStage({
   const shadowSoftness = light ? light.softness : softness;
   const env = light ? light.environment : environment;
   const ref = useRef(null);
+  const [retry,setRetry]=useState(0);
+  const [reducedMotion,setReducedMotion]=useState(()=>typeof window!=='undefined'&&!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  useEffect(()=>{const query=window.matchMedia?.('(prefers-reduced-motion: reduce)');if(!query)return;const change=()=>setReducedMotion(query.matches);query.addEventListener?.('change',change);return()=>query.removeEventListener?.('change',change);},[]);
   const [libraryReady, setLibraryReady] = useState(false);
   const [progress, setProgress] = useState(0);
   const [state, setState] = useState('loading');
@@ -54,12 +58,12 @@ export default function ModelStage({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [retry]);
 
   useEffect(() => {
     setState((s) => (s === 'error' && !libraryReady ? s : 'loading'));
     setProgress(0);
-  }, [src, libraryReady]);
+  }, [src, libraryReady,retry]);
 
   useEffect(() => {
     const el = ref.current;
@@ -89,7 +93,7 @@ export default function ModelStage({
       onReady?.(el);
     };
     const onError = (err) => {
-      console.error('[ModelStage] Failed to load 3D model from:', src, err);
+      // Keep media URLs out of browser error logs.
       setState('error');
     };
     const onCamera = (e) => {
@@ -106,26 +110,19 @@ export default function ModelStage({
       el.removeEventListener('camera-change', onCamera);
       if (viewerRef && viewerRef.current === el) viewerRef.current = null;
     };
-  }, [viewerRef, libraryReady, onReady, onProgress, onInteract, src]);
+  }, [viewerRef, libraryReady, onReady, onProgress, onInteract, src,retry]);
 
   useEffect(() => {
     const el = ref.current;
     if (!el || !libraryReady) return;
-    const flags = {
-      ar: true,
-      'camera-controls': true,
-      'xr-environment': true,
-      'auto-rotate': autoRotate,
-      'disable-zoom': isCard,
-      'disable-pan': isCard,
-    };
-    Object.entries(flags).forEach(([name, on]) => el.toggleAttribute(name, !!on));
-  }, [autoRotate, isCard, libraryReady]);
+    setViewerFlags(el,{ arEnabled, autoRotate:autoRotate&&!reducedMotion, isCard });
+  }, [autoRotate, isCard, libraryReady, arEnabled,retry,reducedMotion]);
 
   return (
     <div className="relative h-full w-full">
       {libraryReady && (
         <model-viewer
+          key={retry}
           ref={ref}
           src={src}
           alt={alt || '3D dish'}
@@ -164,7 +161,7 @@ export default function ModelStage({
         <div className="absolute inset-0 grid place-items-center p-6 text-center">
           <div className="flex flex-col items-center gap-2 text-zinc-500">
             <WifiOff size={22} aria-hidden="true" />
-            <div className="text-xs">3D model unavailable. Check the connection or the S3 bucket read policy.</div>
+            <div className="text-xs">The 3D view could not load. You can still enjoy the photo and dish details.</div><button type="button" className="min-h-11 rounded-xl border border-white/20 px-4 text-sm" onClick={()=>{setState('loading');setRetry(n=>n+1);}}>Retry 3D view</button>
           </div>
         </div>
       )}

@@ -1,0 +1,13 @@
+import { useEffect, useState } from 'react';
+import { api } from '../../api/client.js';
+import { inputClass } from '../ui.jsx';
+import EntitlementFields from './EntitlementFields.jsx';
+
+export default function ProvisioningPlanFields({ onChange, canUpload3d }) {
+  const [plans, setPlans] = useState([]), [definitions, setDefinitions] = useState([]), [selected, setSelected] = useState(''), [overrides, setOverrides] = useState({}), [error, setError] = useState('');
+  useEffect(() => { let live = true; Promise.all([api.plans(), api.entitlementRegistry()]).then(([p, d]) => { if (live) { setPlans(p); setDefinitions(d); } }).catch(e => live && setError(e.message)); return () => { live = false; }; }, []);
+  useEffect(() => { onChange({ planRevisionId: selected ? Number(selected) : null, initialOverrides: overrides }); }, [selected, overrides, onChange]);
+  const plan = plans.find(p => String(p.latestRevisionId) === selected);
+  const base = plan?.values || { ...Object.fromEntries(definitions.map(d => [d.key, d.defaultValue])), 'model.ownerUpload': canUpload3d };
+  return <section className="space-y-4 rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4"><h3 className="font-semibold text-amber-200">Plan & initial capabilities</h3>{error && <p role="alert" className="text-xs text-red-300">Plan configuration unavailable: {error}. Leave legacy compatibility selected to preserve the existing provisioning behavior.</p>}<label className="block text-xs text-zinc-400">Plan revision<select value={selected} onChange={e => { setSelected(e.target.value); setOverrides({}); }} className={`${inputClass} mt-2`}><option value="">Legacy compatibility · existing behavior</option>{plans.filter(p => p.active).map(p => <option value={p.latestRevisionId} key={p.id}>{p.name} · revision {p.version}</option>)}</select></label><p className="text-xs leading-relaxed text-zinc-500">{plan ? 'This restaurant will stay pinned to this revision. Initial exceptions and the plan are saved in the same transaction as the account.' : 'Keeps current menu access and the model-upload permission above. No premium plan is granted.'}</p>{definitions.length > 0 && <details><summary className="cursor-pointer text-sm text-zinc-300">Preview inherited settings & configure exceptions</summary><div className="mt-4"><EntitlementFields definitions={definitions} values={{ ...base, ...overrides }} onChange={(key, value) => setOverrides(o => ({ ...o, [key]: value }))} /></div>{Object.keys(overrides).length > 0 && <button type="button" onClick={() => setOverrides({})} className="mt-3 text-xs text-amber-300">Remove initial exceptions · inherit plan defaults</button>}</details>}</section>;
+}

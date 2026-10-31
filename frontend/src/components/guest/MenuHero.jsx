@@ -8,7 +8,7 @@ import { safeHttpUrl } from '../../utils/format.js';
  * logo, serif title with the verified atelier badge, tagline, service details, bio, and the
  * swipeable social / contact bar directly beneath.
  */
-export default function MenuHero({ restaurant, dishCount = 0, arCount = 0 }) {
+export default function MenuHero({ restaurant, dishCount = 0, arCount = 0, menuMode }) {
   const [bioOpen, setBioOpen] = useState(false);
   const cover = useRef(null);
   const banner = safeHttpUrl(restaurant.bannerUrl);
@@ -75,7 +75,7 @@ export default function MenuHero({ restaurant, dishCount = 0, arCount = 0 }) {
           {dishCount > 0 && <span>{dishCount} {dishCount === 1 ? 'dish' : 'dishes'}</span>}
           {arCount > 0 && (
             <span className="flex items-center gap-1.5 text-accent-300">
-              <Box size={13} aria-hidden="true" /> {arCount} in 3D &amp; AR
+              <Box size={13} aria-hidden="true" /> {arCount} {menuMode==='THREE_D'?'in 3D':'in 3D & AR'}
             </span>
           )}
           <span>Prices in {restaurant.currencyCode || 'USD'}</span>

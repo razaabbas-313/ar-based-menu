@@ -25,6 +25,10 @@ import java.util.Locale;
 @Slf4j
 @Service
 public class BrandingService {
+    private EntitlementService entitlements;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
+
 
     public enum AssetKind {
         LOGO, BANNER;
@@ -72,8 +76,10 @@ public class BrandingService {
         List<String> removedKeys = new ArrayList<>();
         String[] bucketSlug = new String[1];
         Restaurant saved = tx.execute(status -> {
-            Restaurant r = restaurantRepository.findById(tenant.restaurantId())
+            Restaurant r = restaurantRepository.findByIdForUpdate(tenant.restaurantId())
                     .orElseThrow(() -> new MediaNotFoundException("Restaurant not found"));
+            restaurantAccess.requireStudioAccess(tenant);
+            if(entitlements!=null)entitlements.requireFeature(tenant.restaurantId(),"branding.enabled");
             bucketSlug[0] = r.getSlug();
             r.setName(u.name().strip());
             r.setTagline(clean(u.tagline()));
@@ -121,6 +127,7 @@ public class BrandingService {
     public PresignResponseDto presignAsset(Tenant tenant, String kindRaw, BrandingAssetPresignDto request) {
         AssetKind kind = AssetKind.parse(kindRaw);
         Restaurant restaurant = restaurantAccess.requireStudioAccess(tenant);
+        if(entitlements!=null)entitlements.requireFeature(tenant.restaurantId(),"branding.enabled");
         storage.requireConfigured();
         String contentType = MediaRules.normalizeContentType(request.contentType());
         String ext = MediaRules.requireImage(contentType);
@@ -155,8 +162,10 @@ public class BrandingService {
 
         String[] replaced = new String[1];
         Restaurant saved = tx.execute(status -> {
-            Restaurant r = restaurantRepository.findById(tenant.restaurantId())
+            Restaurant r = restaurantRepository.findByIdForUpdate(tenant.restaurantId())
                     .orElseThrow(() -> new MediaNotFoundException("Restaurant not found"));
+            restaurantAccess.requireStudioAccess(tenant);
+            if(entitlements!=null)entitlements.requireFeature(tenant.restaurantId(),"branding.enabled");
             long oldSize;
             if (kind == AssetKind.LOGO) {
                 replaced[0] = r.getLogoS3Key();

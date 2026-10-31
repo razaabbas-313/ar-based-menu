@@ -26,6 +26,7 @@ import { CATEGORY_LABEL, STATUS_STYLE, cx, fmtBytes, fmtDate, fmtPrice } from '.
 import { impersonateRestaurant } from './impersonate.js';
 import RestaurantQrModal from '../RestaurantQrModal.jsx';
 import TemporaryPasswordModal from './TemporaryPasswordModal.jsx';
+import RestaurantEntitlements from './RestaurantEntitlements.jsx';
 import LuxurySelect from '../ui/LuxurySelect.jsx';
 
 const STATUS_OPTIONS = [
@@ -38,6 +39,7 @@ const STATUS_OPTIONS = [
 export default function RestaurantDrawer({ restaurantId, version = 0, onClose, onChanged, onEdit, onDelete, onStatus }) {
   const toast = useToast();
   const [detail, setDetail] = useState(null);
+  const [effectivePolicy, setEffectivePolicy] = useState(null);
   const [modelRequests, setModelRequests] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -112,24 +114,6 @@ export default function RestaurantDrawer({ restaurantId, version = 0, onClose, o
 
   const r = detail?.restaurant;
   const deleted = !!r?.deletedAt;
-  async function toggle3dPermission() {
-    if (deleted || busy === 'toggle3d') return;
-    const next = !r?.canUpload3d;
-    setBusy('toggle3d');
-    setDetail((d) => (d ? { ...d, restaurant: { ...d.restaurant, canUpload3d: next } } : d));
-    try {
-      const updated = await api.adminUpdate3dPermission(restaurantId, next);
-      setDetail((d) => (d ? { ...d, restaurant: updated } : d));
-      toast(next ? 'Direct 3D upload permission enabled' : 'Direct 3D upload permission revoked');
-      onChanged?.(updated);
-    } catch (err) {
-      setDetail((d) => (d ? { ...d, restaurant: { ...d.restaurant, canUpload3d: !next } } : d));
-      toast(err.message, 'error');
-    } finally {
-      setBusy('');
-    }
-  }
-
   const totalBytes = detail ? detail.photoBytes + detail.modelBytes + detail.brandingBytes : 0;
   const share = (n) => (totalBytes ? Math.max(2, Math.round((n / totalBytes) * 100)) : 0);
 
@@ -173,6 +157,7 @@ export default function RestaurantDrawer({ restaurantId, version = 0, onClose, o
           )}
           {detail && (
             <div className="space-y-7">
+              <RestaurantEntitlements restaurantId={restaurantId} onPolicyChange={setEffectivePolicy} key={`${restaurantId}-${version}`} />
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat label="Dishes" value={r.dishCount} />
                 <Stat label="3D models" value={r.model3dCount} />
@@ -196,7 +181,7 @@ export default function RestaurantDrawer({ restaurantId, version = 0, onClose, o
                         />
                       </div>
                       <Action icon={LogIn} label="Open Studio" primary busy={busy === 'imp'} onClick={() => run('imp', () => impersonateRestaurant(r.id).then(() => null), 'Studio opened in a new tab')} />
-                      <Action icon={QrCode} label="Restaurant QR" onClick={() => setQrOpen(true)} />
+                      {effectivePolicy?.operational['qr.venue'] && <Action icon={QrCode} label="Restaurant QR" onClick={() => setQrOpen(true)} />}
                       <Action icon={ExternalLink} label="View Live Menu" href={`/r/${r.slug}`} />
                       <Action icon={Pencil} label="Edit Details" onClick={() => onEdit(r)} />
                     </>
@@ -210,63 +195,7 @@ export default function RestaurantDrawer({ restaurantId, version = 0, onClose, o
                 </div>
               </div>
 
-              {/* Studio Capabilities & Direct 3D Upload Permission */}
-              <section
-                className={cx(
-                  'rounded-2xl border hairline p-4 space-y-3 transition-colors select-none',
-                  !deleted ? 'cursor-pointer hover:border-amber-500/40' : 'opacity-60 cursor-not-allowed',
-                  r?.canUpload3d ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-black/40'
-                )}
-                onClick={() => {
-                  if (deleted || busy === 'toggle3d') return;
-                  toggle3dPermission();
-                }}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className={cx('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl border', r?.canUpload3d ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-amber-500/40 bg-amber-500/10 text-amber-400')}>
-                      <Sparkles size={16} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
-                          Studio Direct 3D Upload
-                        </span>
-                        <span className={cx('rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider', r?.canUpload3d ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800 text-zinc-400')}>
-                          {r?.canUpload3d ? 'Enabled' : 'Concierge Only'}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-xs text-zinc-400 leading-relaxed">
-                        {r?.canUpload3d
-                          ? 'Restaurant owner can upload .glb files directly from the studio portal.'
-                          : 'Restaurant owner must request 3D models with 5 photos (Super Admin concierge desk).'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={deleted || busy === 'toggle3d'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggle3dPermission();
-                    }}
-                    className={cx(
-                      'tap shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none',
-                      r?.canUpload3d ? 'bg-emerald-500' : 'bg-zinc-700'
-                    )}
-                    role="switch"
-                    aria-checked={Boolean(r?.canUpload3d)}
-                    title={r?.canUpload3d ? 'Revoke direct 3D upload permission' : 'Grant direct 3D upload permission'}
-                  >
-                    <span
-                      className={cx(
-                        'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                        r?.canUpload3d ? 'translate-x-6' : 'translate-x-1'
-                      )}
-                    />
-                  </button>
-                </div>
-              </section>
+
 
               {/* 3D Model & Concierge Request History */}
               <section className="rounded-2xl border hairline bg-black/30 p-4 space-y-3">
@@ -443,7 +372,7 @@ export default function RestaurantDrawer({ restaurantId, version = 0, onClose, o
           )}
         </div>
       </aside>
-      {qrOpen && r && <RestaurantQrModal restaurant={{ name: r.name, slug: r.slug }} onClose={() => setQrOpen(false)} />}
+      {qrOpen && r && effectivePolicy?.operational['qr.venue'] && <RestaurantQrModal restaurant={{ name: r.name, slug: r.slug }} onClose={() => setQrOpen(false)} />}
       {tempPassword && (
         <TemporaryPasswordModal
           title="New temporary password"

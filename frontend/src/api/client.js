@@ -103,6 +103,25 @@ async function request(path, { method = 'GET', body, auth = null, timeout = 1500
 }
 
 export const api = {
+  experienceSettings: () => request('/api/v1/studio/experience', {auth:R}),
+  saveExperienceSettings: body => request('/api/v1/studio/experience', {method:'PUT',body,auth:R}),
+  tables: (after=0) => request('/api/v1/studio/tables?after='+encodeURIComponent(after), {auth:R}),
+  createTable: name => request('/api/v1/studio/tables', {method:'POST',body:{name},auth:R}),
+  updateTable: (id,body) => request('/api/v1/studio/tables/'+id, {method:'PUT',body,auth:R}),
+  rotateTable: (id,expectedVersion) => request('/api/v1/studio/tables/'+id+'/rotate', {method:'POST',body:{expectedVersion},auth:R}),
+  guestContext: (slug,tableToken) => request('/api/v1/public/context/'+encodeURIComponent(slug), {method:'POST',body:{tableToken},fresh:true}),
+  prepareOrder: (slug,body) => request('/api/v1/public/order-preparations/'+encodeURIComponent(slug), {method:'POST',body,fresh:true}),
+  waiterRequest: (slug,tableToken) => request('/api/v1/public/waiter-requests/'+encodeURIComponent(slug), {method:'POST',body:{tableToken},fresh:true}),
+  entitlementRegistry: () => request('/api/v1/admin/features', { auth: A }),
+  plans: () => request('/api/v1/admin/plans', { auth: A }),
+  createPlan: (dto) => request('/api/v1/admin/plans', { method: 'POST', body: dto, auth: A }),
+  revisePlan: (id,dto) => request('/api/v1/admin/plans/'+id, { method: 'PUT', body: dto, auth: A }),
+  planRevisions: (id) => request('/api/v1/admin/plans/'+id+'/revisions', { auth: A }),
+  restaurantEntitlements: (id) => request('/api/v1/admin/restaurants/'+id+'/entitlements', { auth: A }),
+  assignPlan: (id,dto) => request('/api/v1/admin/restaurants/'+id+'/entitlements/assignment', { method: 'POST', body: dto, auth: A }),
+  setEntitlementOverride: (id,key,dto) => request('/api/v1/admin/restaurants/'+id+'/entitlements/overrides/'+encodeURIComponent(key), { method: 'PUT', body: dto, auth: A }),
+  removeEntitlementOverride: (id,key,expectedVersion,reason) => request('/api/v1/admin/restaurants/'+id+'/entitlements/overrides/'+encodeURIComponent(key), { method: 'DELETE', body: { expectedVersion, reason }, auth: A }),
+  ownerEntitlements: () => request('/api/v1/studio/entitlements', { auth: R }),
   // ---- public (guests): a single menu by its direct link; there is no directory ----
   publicMenu: (slug, { fresh = false } = {}) =>
     request(`/api/v1/public/menu/${encodeURIComponent(slug)}`, { fresh }),

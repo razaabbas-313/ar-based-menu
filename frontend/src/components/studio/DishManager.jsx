@@ -25,6 +25,7 @@ export default function DishManager({
   onNewDish,
   onReload,
   canUpload3d,
+  conciergeAllowed = true,
 }) {
   const toast = useToast();
   const { restaurant } = useAuth();
@@ -121,6 +122,7 @@ export default function DishManager({
     request3d: (d) => setRequest3dFor(d),
     upload3d: (d) => setModelModalFor(d),
     canDirectUpload,
+    conciergeAllowed,
   };
 
   if (loading) {
@@ -232,7 +234,7 @@ export default function DishManager({
                     <td className="px-4 py-3 text-zinc-400">{d.categoryName || CATEGORY_LABEL[d.dishCategory] || d.dishCategory}</td>
                     <td className="px-4 py-3 font-mono text-zinc-200">{fmtPrice(d.priceTag, currency, currencySymbol)}</td>
                     <td className="px-4 py-3">
-                      <MediaBadges dish={d} onRequest3d={actions.request3d} onUpload3d={actions.upload3d} canDirectUpload={canDirectUpload} />
+                      <MediaBadges dish={d} onRequest3d={conciergeAllowed ? actions.request3d : null} onUpload3d={actions.upload3d} canDirectUpload={canDirectUpload} />
                     </td>
                     <td className="px-4 py-3">
                       <Toggle on={d.available} onChange={() => !busyIds.has(d.id) && toggleStock(d)} label={d.available ? 'In stock' : 'Out of stock'} />
@@ -268,7 +270,7 @@ export default function DishManager({
                     </div>
                     <div className="mt-1 text-xs text-zinc-500">{d.categoryName || CATEGORY_LABEL[d.dishCategory] || d.dishCategory}</div>
                     <div className="mt-2">
-                      <MediaBadges dish={d} onRequest3d={actions.request3d} onUpload3d={actions.upload3d} canDirectUpload={canDirectUpload} />
+                      <MediaBadges dish={d} onRequest3d={conciergeAllowed ? actions.request3d : null} onUpload3d={actions.upload3d} canDirectUpload={canDirectUpload} />
                     </div>
                   </div>
                 </div>
@@ -425,7 +427,7 @@ function MediaBadges({ dish, onRequest3d, onUpload3d, canDirectUpload }) {
 function RowActions({ dish, busy, actions }) {
   const btn = 'tap grid h-10 w-10 place-items-center rounded-full border hairline text-zinc-300 hover:border-amber-500/40 hover:text-amber-300 disabled:opacity-40';
   const isPending = dish.modelRequestStatus === 'REQUESTED' || dish.modelRequestStatus === 'IN_PRODUCTION' || dish.modelPending;
-  const canRequest3d = !isPending;
+  const canRequest3d = !isPending && actions.conciergeAllowed;
   return (
     <div className="flex items-center justify-end gap-1.5">
       <button type="button" disabled={busy} onClick={() => actions.edit(dish)} className={btn} aria-label={`Edit ${dish.dishTitle}`} title="Edit dish">

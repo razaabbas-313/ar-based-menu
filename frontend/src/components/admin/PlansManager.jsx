@@ -1,0 +1,41 @@
+import { useEffect, useState } from 'react';
+import { Plus, Search, Save, Layers, RefreshCw } from 'lucide-react';
+import { api } from '../../api/client.js';
+import { inputClass, primaryButtonClass, Spinner } from '../ui.jsx';
+import { useToast } from '../Toast.jsx';
+import EntitlementFields, { displayValue } from './EntitlementFields.jsx';
+
+export default function PlansManager() {
+  const toast = useToast();
+  const [plans, setPlans] = useState(null), [definitions, setDefinitions] = useState([]);
+  const [selected, setSelected] = useState(null), [draft, setDraft] = useState(null), [revisions, setRevisions] = useState([]);
+  const [search, setSearch] = useState(''), [filter, setFilter] = useState('all'), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  useEffect(() => { let live = true; Promise.all([api.plans(), api.entitlementRegistry()]).then(([p, d]) => { if (live) { setPlans(p); setDefinitions(d); } }).catch(e => live && setError(e.message)); return () => { live = false; }; }, []);
+  useEffect(() => { let live = true; setRevisions([]); if (selected) api.planRevisions(selected.id).then(r => live && setRevisions(r)).catch(e => live && setError(e.message)); return () => { live = false; }; }, [selected]);
+  function open(plan) { setError(''); setSelected(plan); setDraft({ name: plan?.name || '', description: plan?.description || '', active: plan?.active ?? true, expectedVersion: plan?.version || 0, values: plan?.values || Object.fromEntries(definitions.map(d => [d.key, d.defaultValue])) }); }
+  async function save(e) {
+    e.preventDefault();
+    if (selected && !window.confirm(`Publish a new revision of “${draft.name}”? Assigned restaurants stay on their current revision.`)) return;
+    setBusy(true); setError('');
+    try { const saved = selected ? await api.revisePlan(selected.id, draft) : await api.createPlan(draft); setPlans(current => [...current.filter(p => p.id !== saved.id), saved]); open(saved); toast(selected ? 'New plan revision published' : 'Plan created'); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  if (!plans && !error) return <div className="grid min-h-64 place-items-center"><Spinner /></div>;
+  const visible = (plans || []).filter(p => p.name.toLowerCase().includes(search.toLowerCase()) && (filter === 'all' || p.active === (filter === 'active')));
+  return <section className="space-y-6">
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-display text-3xl font-semibold">Plans & capabilities</h2><p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-400">Design the service each restaurant receives. Publish a revision, then choose exactly which restaurants move to it.</p></div><button type="button" disabled={!definitions.length} onClick={() => open(null)} className={primaryButtonClass}><Plus size={17} />Create plan</button></header>
+    {error && <div role="alert" className="rounded-2xl border border-red-400/25 bg-red-400/5 p-4 text-sm text-red-300">{error}{!plans && <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>Retry</button>}</div>}
+    <div className={`grid gap-6 ${draft ? 'xl:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.25fr)]' : ''}`}>
+      <div className="space-y-4"><div className="flex flex-wrap gap-2"><div className="relative grow"><Search size={16} className="absolute left-3 top-3.5 text-zinc-500" /><input aria-label="Search plans" value={search} onChange={e => setSearch(e.target.value)} placeholder="Find a plan" className={`${inputClass} !pl-9`} /></div><select aria-label="Filter plan status" value={filter} onChange={e => setFilter(e.target.value)} className={`${inputClass} !w-auto`}><option value="all">All plans</option><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+        {!visible.length && <div className="rounded-3xl border border-dashed border-white/15 p-10 text-center"><Layers size={28} className="mx-auto mb-3 text-amber-300" /><h3 className="font-semibold">{plans?.length ? 'No matching plans' : 'Your plan catalogue starts here'}</h3><p className="mt-2 text-sm text-zinc-500">{plans?.length ? 'Try another search or status.' : 'Create reusable capabilities and limits. Existing restaurants retain their legacy access.'}</p></div>}
+        <div className={draft ? 'space-y-3' : 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'}>{visible.map(p => <button type="button" key={p.id} onClick={() => open(p)} className={`w-full rounded-3xl border p-5 text-left transition-colors hover:border-amber-400/50 ${selected?.id === p.id ? 'border-amber-400/60 bg-amber-400/5' : 'border-white/10 bg-white/[0.02]'}`}><div className="flex justify-between gap-3"><h3 className="font-display text-xl font-semibold">{p.name}</h3><span className={`h-fit rounded-full px-2.5 py-1 text-[11px] ${p.active ? 'bg-emerald-400/10 text-emerald-300' : 'bg-zinc-700/40 text-zinc-400'}`}>{p.active ? 'Active' : 'Inactive'}</span></div><p className="mt-2 min-h-10 text-sm leading-relaxed text-zinc-500">{p.description || 'No description yet.'}</p><div className="mt-5 grid grid-cols-2 gap-3 border-t border-white/5 pt-4 text-xs text-zinc-500"><div>Dishes<strong className="mt-1 block text-sm font-medium text-zinc-200">{displayValue(p.values['quota.dishes'])}</strong></div><div>Model slots<strong className="mt-1 block text-sm font-medium text-zinc-200">{displayValue(p.values['quota.models'])}</strong></div></div><p className="mt-4 text-xs text-amber-300/80">Revision {p.version} · View configuration →</p></button>)}</div>
+      </div>
+      {draft && <form onSubmit={save} className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 sm:p-7"><div className="mb-6 flex items-start justify-between gap-4"><div><h3 className="font-display text-2xl font-semibold">{selected ? 'Publish a revision' : 'Create a plan'}</h3><p className="mt-1 text-xs text-zinc-500">{selected ? `Current revision ${selected.version}. Existing assignments will not change.` : 'No billing or payment collection.'}</p></div><button type="button" onClick={() => setDraft(null)} className="text-sm text-zinc-400">Close</button></div>
+        <label className="mb-4 block text-sm text-zinc-400">Plan name<input required maxLength={100} value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} className={`${inputClass} mt-2`} /></label><label className="mb-4 block text-sm text-zinc-400">Description<textarea maxLength={1000} rows={2} value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} className={`${inputClass} mt-2`} /></label><label className="mb-7 flex items-center gap-3 text-sm text-zinc-300"><input type="checkbox" checked={draft.active} onChange={e => setDraft({ ...draft, active: e.target.checked })} className="accent-amber-400" />Accept new assignments<span className="text-xs text-zinc-500">Existing assignments remain valid when inactive.</span></label>
+        <EntitlementFields definitions={definitions} values={draft.values} disabled={busy} onChange={(key, value) => setDraft(d => ({ ...d, values: { ...d.values, [key]: value } }))} />
+        <div className="sticky bottom-3 mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-zinc-900/95 p-4 backdrop-blur"><span className="text-xs text-zinc-500">Changes take effect only after the server saves them.</span><button disabled={busy || !draft.name.trim()} className={primaryButtonClass}>{busy ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}{selected ? 'Publish revision' : 'Create plan'}</button></div>
+        {selected && <details className="mt-6 border-t border-white/10 pt-4"><summary className="cursor-pointer text-sm text-zinc-400">Revision history · {revisions.length}</summary><ol className="mt-3 space-y-2">{revisions.map(r => <li key={r.id} className="rounded-xl bg-white/[0.03] px-4 py-3 text-xs text-zinc-400"><strong className="text-zinc-200">Revision {r.revision} · {r.name}</strong><div className="mt-1">{new Date(r.createdAt).toLocaleString()} · Dishes: {displayValue(r.values['quota.dishes'])} · Models: {displayValue(r.values['quota.models'])}</div></li>)}</ol></details>}
+      </form>}
+    </div>
+  </section>;
+}

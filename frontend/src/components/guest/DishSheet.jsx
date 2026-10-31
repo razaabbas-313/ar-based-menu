@@ -13,7 +13,7 @@ import { api } from '../../api/client.js';
  * invisible underneath the photo. "View in 3D" only reveals the already-parsed model, so the 3D
  * view appears instantly, without a download spinner.
  */
-export default function DishSheet({ item, slug, currency, currencySymbol, onClose, onArFallback }) {
+export default function DishSheet({ item, slug, currency, currencySymbol, onClose, onArFallback, arAllowed = true, onAddToCart }) {
   const [view, setView] = useState('photo'); // photo | 3d
   const [lighting, setLighting] = useState('studio');
   const [progress, setProgress] = useState(0);
@@ -23,6 +23,11 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
   const viewer = useRef(null);
   const arIntentRef = useRef(false);
   const has3d = !!(item.is3d && item.modelUrl);
+
+  useEffect(() => {
+    if(!has3d)setView('photo');
+    if(!arAllowed){arIntentRef.current=false;setArIntent(false);}
+  },[has3d,arAllowed]);
 
   useEffect(() => {
     if (has3d) preloadModelViewer();
@@ -38,6 +43,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
 
   const tryAr = useCallback(
     (el) => {
+      if(!arAllowed)return false;
       const mv = el || viewer.current;
       if (mv && mv.canActivateAR) {
         mv.activateAR();
@@ -46,7 +52,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
       onArFallback(item);
       return false;
     },
-    [item, onArFallback],
+    [item, onArFallback, arAllowed],
   );
 
   const onReady = useCallback(
@@ -72,6 +78,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
   };
 
   const requestAr = () => {
+    if(!arAllowed)return;
     buzz(14);
     setView('3d');
     if (slug) {
@@ -114,6 +121,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
                   src={item.modelUrl}
                   alt={item.dishTitle}
                   arPlacement={item.arPlacement}
+                  arEnabled={arAllowed}
                   variant="full"
                   lighting={lighting}
                   autoRotate={view === '3d'}
@@ -235,6 +243,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
           </div>
         </div>
 
+        {onAddToCart && item.priceTag != null && <div className="shrink-0 border-t border-white/10 p-4"><button type="button" className="min-h-12 w-full rounded-2xl bg-amber-300 px-5 font-semibold text-zinc-950" onClick={()=>onAddToCart(item)}>Add to request</button></div>}
         {has3d && (
           <div className="grid shrink-0 grid-cols-1 gap-2 border-t border-white/10 bg-black/40 px-4 py-4 sm:grid-cols-2">
             {view === 'photo' && (
@@ -250,16 +259,19 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
                 </span>
               </button>
             )}
-            <button
+            {arAllowed && <button
               type="button"
               onClick={requestAr}
+              disabled={!arAllowed}
+              data-testid="launch-ar"
+              title={arAllowed ? 'View in AR' : 'AR is not available under this menu policy'}
               className={cx(
                 'tap pulse-ring flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-accent-400 to-accent-600 text-[15px] font-bold text-zinc-950',
                 view === '3d' && 'sm:col-span-2',
               )}
             >
               <Smartphone size={19} aria-hidden="true" /> View on Your Table (AR)
-            </button>
+            </button>}
           </div>
         )}
       </div>

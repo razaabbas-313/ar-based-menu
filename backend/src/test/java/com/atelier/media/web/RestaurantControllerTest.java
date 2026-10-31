@@ -65,7 +65,7 @@ class RestaurantControllerTest {
 
         mvc.perform(get("/api/v1/public/menu/bistro-a"))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Cache-Control", "max-age=15, public, stale-while-revalidate=60"))
+                .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.restaurant.themeAccent").value("emerald"))
                 .andExpect(jsonPath("$.restaurant.whatsappNumber").value("+33612345678"))
                 .andExpect(jsonPath("$.restaurant.email").doesNotExist())
@@ -80,7 +80,7 @@ class RestaurantControllerTest {
 
         mvc.perform(get("/api/v1/public/menu/bistro-a").param("preview", "true"))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Cache-Control", "max-age=15, public, stale-while-revalidate=60"))
+                .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.restaurant.themeAccent").value("emerald"))
                 .andExpect(jsonPath("$.items", hasSize(3)));
 

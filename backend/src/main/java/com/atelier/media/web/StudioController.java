@@ -181,7 +181,7 @@ public class StudioController {
             @PathVariable long id,
             @Valid @RequestBody List<ModelRequestItemDto> items) {
         Tenant tenant = Tenant.from(jwt);
-        return noStore(modelRequestService.presignPhotos(tenant.restaurantId(), id, items));
+        return noStore(modelRequestService.presignPhotos(tenant, id, items));
     }
 
     @PostMapping("/dishes/{id}/model-request/confirm")

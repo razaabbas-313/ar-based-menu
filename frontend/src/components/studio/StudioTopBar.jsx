@@ -7,7 +7,7 @@ import { useToast } from '../Toast.jsx';
 import { STATUS_STYLE, buzz, cx, fmtBytes } from '../../utils/format.js';
 
 /** Restaurant badge, status, usage, link to the public menu, impersonation banner. */
-export default function StudioTopBar({ settings, onSettingsChange }) {
+export default function StudioTopBar({ settings, onSettingsChange, qrAllowed = true }) {
   const toast = useToast();
   const { restaurant, impersonatedBy, logout } = useAuth();
   const branding = settings?.branding;
@@ -96,6 +96,8 @@ export default function StudioTopBar({ settings, onSettingsChange }) {
               setQrOpen(true);
             }}
             className="tap flex h-11 min-w-11 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-amber-400 to-amber-600 px-3 text-[13px] font-bold text-zinc-950 shadow-fab md:px-4"
+            disabled={!qrAllowed}
+            title={qrAllowed ? 'Generate restaurant QR' : 'Restaurant QR generation is disabled by your current policy'}
             aria-label="Restaurant QR code"
           >
             <QrCode size={16} aria-hidden="true" />
@@ -124,7 +126,7 @@ export default function StudioTopBar({ settings, onSettingsChange }) {
           </button>
         </div>
       </div>
-      {qrOpen && <RestaurantQrModal restaurant={{ name, slug: restaurant.slug }} onClose={() => setQrOpen(false)} />}
+      {qrOpen && qrAllowed && <RestaurantQrModal restaurant={{ name, slug: restaurant.slug }} onClose={() => setQrOpen(false)} />}
     </header>
   );
 }
