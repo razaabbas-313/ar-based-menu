@@ -190,7 +190,7 @@ public class StudioController {
             @PathVariable long id,
             @Valid @RequestBody ModelRequestConfirmDto dto) {
         Tenant tenant = Tenant.from(jwt);
-        return noStore(modelRequestService.confirmRequest(tenant.restaurantId(), id, dto));
+        return noStore(modelRequestService.confirmRequest(tenant, id, dto));
     }
 
     @GetMapping("/model-requests")

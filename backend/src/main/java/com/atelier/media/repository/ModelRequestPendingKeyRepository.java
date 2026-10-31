@@ -14,5 +14,7 @@ public interface ModelRequestPendingKeyRepository extends JpaRepository<ModelReq
 
     void deleteByDishId(Long dishId);
 
+    List<ModelRequestPendingKey> findTop100ByCreatedAtBefore(Instant cutoff);
+
     void deleteByCreatedAtBefore(Instant cutoff);
 }

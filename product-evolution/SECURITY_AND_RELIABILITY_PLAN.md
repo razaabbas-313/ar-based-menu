@@ -17,10 +17,10 @@ Historical [technical audit](../TECHNICAL_AUDIT.md) is superseded for current st
 | A07 | Open: category changes lack menu invalidation; default seeding races | Post-commit eviction and real duplicate/concurrency analysis |
 | A08 | Open: daily read/increment/save and unobserved async completion | Atomic PostgreSQL aggregation with exact concurrent-count assertions |
 | A09 | Open: concierge S3 calls under DB transaction/lock | Network validation outside short transaction with locked revalidation |
-| A10 | Open: private/pending/history cleanup gaps, false delete acknowledgement, daily orphans | Durable retry/lifecycle accounting; no production cleanup experiment |
+| A10 | B3 locally implemented truthful deletion outcomes and unresolved current-reference retention; private/pending/history completeness and daily orphans remain open | B4+B5 durable cleanup/lifecycle and transaction safety; no production cleanup experiment |
 | A11 | Partly improved by A01; TTL/storage/bootstrap/admin session UX remain | Coherent password-change/re-login behavior, bootstrap revocation and explicit session policy |
 | A12 | Open: inconsistent metadata/ETag checks, prefix-only admin confirmation, reusable PUT | Issued-upload binding and content/finalization design |
-| A13 | Open: private uploads use public immutable cache metadata | Separate private caching and nonproduction verification |
+| A13 | B2 locally implemented private,no-store PUT metadata and private GET response overrides; public immutable caching preserved | Old object metadata/copies unchanged; actual AWS/browser verification remains unperformed; see [sprint results](../project-documentation/SPRINT_B2_B3_RESULTS.md) |
 | A14 | Partly improved: 374 executed regressions; browser/PostgreSQL/CI still missing | Meaningful integration/release gates |
 | A15 | Partly improved: token-version cache removed; menu/throttle caches remain local | Explicit single-instance assumption, multi-instance coordination before scale |
 | A16 | Historical documentation drift persists | New blueprint and actual-state docs linked; no unauthorized AGENTS/root-doc edits |

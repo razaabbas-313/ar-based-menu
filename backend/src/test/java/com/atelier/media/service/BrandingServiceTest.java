@@ -104,8 +104,7 @@ class BrandingServiceTest {
 
         assertThat(dto.branding().logoUrl()).endsWith("logo-new.webp");
         verify(h.restaurantRepository).adjustUsage(A, 2_000L, 0, 0);
-        verify(h.s3Client).deleteObject(DeleteObjectRequest.builder()
-                .bucket("atelier-test-bucket").key("restaurant-atelier/bistro-a/branding/logo-old.webp").build());
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test
@@ -129,7 +128,7 @@ class BrandingServiceTest {
 
         assertThat(dto.branding().bannerUrl()).isNull();
         verify(h.restaurantRepository).adjustUsage(A, -300_000L, 0, 0);
-        verify(h.s3Client).deleteObject(any(DeleteObjectRequest.class));
+        verify(h.s3Client, org.mockito.Mockito.never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test

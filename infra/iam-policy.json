@@ -5,14 +5,17 @@
       "Sid": "AtelierMediaObjects",
       "Effect": "Allow",
       "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
-      "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/restaurant-atelier/*"
+      "Resource": [
+        "arn:aws:s3:::YOUR_BUCKET_NAME/restaurant-atelier/*",
+        "arn:aws:s3:::YOUR_BUCKET_NAME/restaurant-atelier-private/*"
+      ]
     },
     {
       "Sid": "AtelierTenantFolderSweep",
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME",
-      "Condition": { "StringLike": { "s3:prefix": ["restaurant-atelier/*"] } }
+      "Condition": { "StringLike": { "s3:prefix": ["restaurant-atelier/*", "restaurant-atelier-private/*"] } }
     }
   ]
 }

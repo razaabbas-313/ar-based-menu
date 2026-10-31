@@ -97,9 +97,6 @@ public class MediaReplacementService {
             d.setPendingImageCreatedAt(Instant.now());
             return mediaRepository.save(d);
         });
-        if (previousPending[0] != null) {
-            storage.deleteQuietly(dish.getS3Bucket(), previousPending[0]);
-        }
         S3Storage.PresignedUpload upload = storage.presignPut(key[0], contentType, request.uploadSizeBytes());
         log.info("Presigned photo replacement restaurant={} dish={} key={} bytes={}",
                 restaurant.getSlug(), id, key[0], request.uploadSizeBytes());
@@ -129,13 +126,11 @@ public class MediaReplacementService {
         String clientEtag = MediaService.stripQuotes(confirm.etag());
         if (actualSize == null || !actualSize.equals(dish.getPendingImageSizeBytes())) {
             discardPending(tenant, id, confirm.s3Key());
-            storage.deleteQuietly(dish.getS3Bucket(), confirm.s3Key());
             throw new UploadVerificationException("Size mismatch: expected %s bytes but S3 holds %s bytes."
                     .formatted(dish.getPendingImageSizeBytes(), actualSize));
         }
         if (clientEtag != null && !clientEtag.isBlank() && s3Etag != null && !clientEtag.equals(s3Etag)) {
             discardPending(tenant, id, confirm.s3Key());
-            storage.deleteQuietly(dish.getS3Bucket(), confirm.s3Key());
             throw new UploadVerificationException("ETag mismatch: the object in S3 is not the one this browser uploaded.");
         }
 
@@ -172,11 +167,8 @@ public class MediaReplacementService {
         });
 
         // Post-commit cleanup of the replaced object: the DB no longer references it.
-        if (oldKey[0] != null && !oldKey[0].equals(confirm.s3Key())) {
-            storage.deleteQuietly(saved.getS3Bucket(), oldKey[0]);
-        }
         menuCache.evict(restaurant.getSlug());
-        log.info("Photo replaced restaurant={} dish={} key={} bytes={} removed={}",
+        log.info("Photo replaced restaurant={} dish={} key={} bytes={} cleanupRequested={}",
                 restaurant.getSlug(), id, confirm.s3Key(), actualSize, oldKey[0]);
         return DishMapper.toDto(saved);
     }

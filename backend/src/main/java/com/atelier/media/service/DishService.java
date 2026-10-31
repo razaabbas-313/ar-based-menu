@@ -160,9 +160,8 @@ public class DishService {
         if (removed.getModelS3Key() != null) keys.add(removed.getModelS3Key());
         if (removed.getPendingModelS3Key() != null) keys.add(removed.getPendingModelS3Key());
         if (removed.getPendingImageS3Key() != null) keys.add(removed.getPendingImageS3Key());
-        keys.forEach(k -> storage.deleteQuietly(removed.getS3Bucket(), k));
         menuCache.evict(restaurant.getSlug());
-        log.info("Deleted dish restaurant={} id={} files={}", restaurant.getSlug(), id, keys.size());
+        log.info("Deleted dish record restaurant={} id={} fileCleanupRequested={}", restaurant.getSlug(), id, keys.size());
     }
 
     // ------------------------------------------------------------------ 3D track
@@ -197,9 +196,6 @@ public class DishService {
             }
             return mediaRepository.save(d);
         });
-        if (previousPending[0] != null) {
-            storage.deleteQuietly(dish.getS3Bucket(), previousPending[0]);
-        }
         S3Storage.PresignedUpload upload = storage.presignPut(key, contentType, request.uploadSizeBytes());
         log.info("Presigned 3D attach restaurant={} dish={} key={} bytes={}", restaurant.getSlug(), id, key, request.uploadSizeBytes());
         return new PresignResponseDto(upload.url(), key, storage.publicUrl(key), dish.getId(),
@@ -225,7 +221,6 @@ public class DishService {
         Long actualSize = head.contentLength();
         if (actualSize == null || !actualSize.equals(dish.getPendingModelSizeBytes())) {
             clearPending(tenant, id, confirm.s3Key());
-            storage.deleteQuietly(dish.getS3Bucket(), confirm.s3Key());
             throw new UploadVerificationException("Size mismatch: expected %s bytes but S3 holds %s bytes."
                     .formatted(dish.getPendingModelSizeBytes(), actualSize));
         }
@@ -251,9 +246,6 @@ public class DishService {
             restaurantRepository.adjustUsage(tenant.restaurantId(), actualSize - oldSize, 0, hadModel ? 0 : 1);
             return updated;
         });
-        if (replacedKey[0] != null && !replacedKey[0].equals(confirm.s3Key())) {
-            storage.deleteQuietly(saved.getS3Bucket(), replacedKey[0]);
-        }
         menuCache.evict(restaurant.getSlug());
         log.info("3D model confirmed restaurant={} dish={} key={} bytes={} replaced={}",
                 restaurant.getSlug(), id, confirm.s3Key(), actualSize, replacedKey[0]);
@@ -283,7 +275,6 @@ public class DishService {
             return updated;
         });
         if (removedKey[0] != null) {
-            storage.deleteQuietly(saved.getS3Bucket(), removedKey[0]);
             menuCache.evict(restaurant.getSlug());
         }
         return DishMapper.toDto(saved);

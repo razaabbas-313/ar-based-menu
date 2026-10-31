@@ -114,7 +114,6 @@ public class BrandingService {
             }
             return updated;
         });
-        removedKeys.forEach(storage::deleteQuietly);
         menuCache.evict(bucketSlug[0]);
         return StudioSettingsDto.from(saved);
     }
@@ -151,7 +150,6 @@ public class BrandingService {
         long size = head.contentLength() == null ? 0 : head.contentLength();
         String headType = head.contentType() == null ? "" : MediaRules.normalizeContentType(head.contentType());
         if (!MediaRules.IMAGE_TYPES.containsKey(headType) || size <= 0 || size > props.maxBrandingBytes()) {
-            storage.deleteQuietly(confirm.s3Key());
             throw new UploadVerificationException("The uploaded file is not a valid logo/banner image.");
         }
 
@@ -178,9 +176,6 @@ public class BrandingService {
             updated.setStorageUsedBytes(Math.max(0, updated.getStorageUsedBytes() + size - oldSize));
             return updated;
         });
-        if (replaced[0] != null && !replaced[0].equals(confirm.s3Key())) {
-            storage.deleteQuietly(replaced[0]);
-        }
         menuCache.evict(saved.getSlug());
         log.info("Branding {} updated restaurant={} key={} bytes={}", kind, saved.getSlug(), confirm.s3Key(), size);
         return StudioSettingsDto.from(saved);

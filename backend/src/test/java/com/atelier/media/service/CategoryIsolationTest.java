@@ -98,12 +98,15 @@ class CategoryIsolationTest {
         var requests = mock(ModelRequestRepository.class);
         var pending = mock(ModelRequestPendingKeyRepository.class);
         var concierge = new ModelRequestService(h.mediaRepository, h.restaurantRepository, h.categoryRepository,
-                requests, pending, storage, h.menuCache, new ObjectMapper(), h.props);
+                requests, pending, storage, h.menuCache, new ObjectMapper(), h.props, h.tx, h.restaurantAccess, mock(AdminAccess.class), mock(DurableCleanup.class));
         Media dish = TestFixtures.media(10L, 1L, "bistro-a", UploadStatus.COMPLETED);
         dish.setCategoryId(20L);
         when(h.mediaRepository.findById(10L)).thenReturn(Optional.of(dish));
         when(h.s3Client.headObject(any(HeadObjectRequest.class)))
                 .thenReturn(HeadObjectResponse.builder().contentLength(100L).contentType("model/gltf-binary").build());
+        when(requests.save(any())).thenAnswer(i->i.getArgument(0));
+        dish.setPendingModelS3Key("restaurant-atelier/bistro-a/models/twin.glb");
+        when(h.mediaRepository.findByIdAndRestaurantIdForUpdate(10L,1L)).thenReturn(Optional.of(dish));
         var response = concierge.approveModel(10L,
                 new AdminModelApproveDto("restaurant-atelier/bistro-a/models/twin.glb", null, "table"),
                 new AdminPrincipal(1L, "owner@platform.test"));
