@@ -6,7 +6,6 @@ import com.atelier.media.dto.admin.AdminProfileDto;
 import com.atelier.media.dto.admin.ChangePasswordDto;
 import com.atelier.media.exception.InvalidCredentialsException;
 import com.atelier.media.exception.InvalidFieldException;
-import com.atelier.media.exception.InvalidTokenException;
 import com.atelier.media.model.PlatformUser;
 import com.atelier.media.repository.PlatformUserRepository;
 import com.atelier.media.security.AdminPrincipal;
@@ -27,14 +26,17 @@ public class AdminAuthService {
     private final PlatformUserRepository users;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
+    private final AdminAccess adminAccess;
     private final com.atelier.media.security.LoginThrottle loginAttempts;
     private final String timingDummyHash;
 
     public AdminAuthService(PlatformUserRepository users, PasswordEncoder passwordEncoder,
-                            TokenService tokenService, com.atelier.media.security.LoginThrottle loginAttempts) {
+                            TokenService tokenService, com.atelier.media.security.LoginThrottle loginAttempts,
+                            AdminAccess adminAccess) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
+        this.adminAccess = adminAccess;
         this.loginAttempts = loginAttempts;
         this.timingDummyHash = passwordEncoder.encode("atelier-admin-timing-equalizer");
     }
@@ -68,12 +70,12 @@ public class AdminAuthService {
 
     @Transactional(readOnly = true)
     public AdminProfileDto me(AdminPrincipal principal) {
-        return AdminProfileDto.from(require(principal));
+        return AdminProfileDto.from(adminAccess.requireAccount(principal));
     }
 
     @Transactional
     public AdminProfileDto changePassword(AdminPrincipal principal, ChangePasswordDto dto) {
-        PlatformUser admin = require(principal);
+        PlatformUser admin = adminAccess.requireAccount(principal);
         if (!passwordEncoder.matches(dto.currentPassword(), admin.getPasswordHash())) {
             throw new InvalidFieldException("currentPassword", "Your current password is not correct.");
         }
@@ -87,12 +89,4 @@ public class AdminAuthService {
         return AdminProfileDto.from(users.save(admin));
     }
 
-    private PlatformUser require(AdminPrincipal principal) {
-        PlatformUser admin = users.findById(principal.adminId())
-                .orElseThrow(() -> new InvalidTokenException("This admin account no longer exists. Please sign in again."));
-        if (principal.tokenVersion() != null && admin.getTokenVersion() != principal.tokenVersion()) {
-            throw new InvalidTokenException("This admin session has been revoked. Please sign in again.");
-        }
-        return admin;
-    }
 }

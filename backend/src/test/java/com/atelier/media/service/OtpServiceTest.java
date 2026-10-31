@@ -7,15 +7,18 @@ import com.atelier.media.dto.ResetPasswordOtpDto;
 import com.atelier.media.exception.InvalidFieldException;
 import com.atelier.media.model.PasswordResetOtp;
 import com.atelier.media.model.Restaurant;
+import com.atelier.media.model.RestaurantStatus;
 import com.atelier.media.repository.PasswordResetOtpRepository;
 import com.atelier.media.repository.RestaurantRepository;
 import com.atelier.media.support.TestFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -83,8 +86,9 @@ class OtpServiceTest {
                 java.util.List.of()
         );
 
-        enabledService = new OtpService(otpRepository, restaurantRepository, passwordEncoder, emailSender, propsEnabled);
-        disabledService = new OtpService(otpRepository, restaurantRepository, passwordEncoder, emailSender, propsDisabled);
+        PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
+        enabledService = new OtpService(otpRepository, restaurantRepository, passwordEncoder, emailSender, propsEnabled, transactions);
+        disabledService = new OtpService(otpRepository, restaurantRepository, passwordEncoder, emailSender, propsDisabled, transactions);
     }
 
     @Test
@@ -102,8 +106,8 @@ class OtpServiceTest {
     void enumerationSafetyReturnsSamePayloadForExistingAndNonExistingEmails() {
         Restaurant existing = TestFixtures.restaurant(1L, "bistro-a");
         existing.setEmail("chef@bistro.com");
-        when(restaurantRepository.findByEmail("chef@bistro.com")).thenReturn(Optional.of(existing));
-        when(restaurantRepository.findByEmail("nonexistent@nowhere.com")).thenReturn(Optional.empty());
+        when(restaurantRepository.findByEmailForUpdate("chef@bistro.com")).thenReturn(Optional.of(existing));
+        when(restaurantRepository.findByEmailForUpdate("nonexistent@nowhere.com")).thenReturn(Optional.empty());
 
         MessageResponseDto existingResp = enabledService.sendPasswordResetOtp(new ForgotPasswordDto("chef@bistro.com"), "127.0.0.1");
         MessageResponseDto nonExistingResp = enabledService.sendPasswordResetOtp(new ForgotPasswordDto("nonexistent@nowhere.com"), "127.0.0.1");
@@ -120,7 +124,7 @@ class OtpServiceTest {
     void rateLimitedResendWithin60Seconds() {
         Restaurant existing = TestFixtures.restaurant(1L, "bistro-a");
         existing.setEmail("chef@bistro.com");
-        when(restaurantRepository.findByEmail("chef@bistro.com")).thenReturn(Optional.of(existing));
+        when(restaurantRepository.findByEmailForUpdate("chef@bistro.com")).thenReturn(Optional.of(existing));
 
         PasswordResetOtp recentOtp = PasswordResetOtp.builder()
                 .id(1L)
@@ -140,6 +144,8 @@ class OtpServiceTest {
 
     @Test
     void wrongOtpIncrementsAttemptsAndLocksOutAfter5() {
+        when(restaurantRepository.findByEmailForUpdate("chef@bistro.com"))
+                .thenReturn(Optional.of(TestFixtures.restaurant(1L, "bistro-a")));
         String realCode = "654321";
         String hashedCode = passwordEncoder.encode(realCode);
 
@@ -166,8 +172,9 @@ class OtpServiceTest {
         verify(otpRepository).save(otp);
     }
 
-    @Test
-    void successfulResetInvalidatesOtpAndUpdatesPassword() {
+    @ParameterizedTest
+    @EnumSource(value = RestaurantStatus.class, names = "SUSPENDED", mode = EnumSource.Mode.EXCLUDE)
+    void successfulResetInvalidatesOtpAndUpdatesPassword(RestaurantStatus status) {
         String realCode = "789123";
         String hashedCode = passwordEncoder.encode(realCode);
 
@@ -183,10 +190,11 @@ class OtpServiceTest {
 
         Restaurant restaurant = TestFixtures.restaurant(1L, "bistro-a");
         restaurant.setEmail("chef@bistro.com");
+        restaurant.setStatus(status);
 
         when(otpRepository.findTopByEmailAndUsedFalseAndExpiresAtAfterOrderByCreatedAtDesc(eq("chef@bistro.com"), any(Instant.class)))
                 .thenReturn(Optional.of(otp));
-        when(restaurantRepository.findByEmail("chef@bistro.com")).thenReturn(Optional.of(restaurant));
+        when(restaurantRepository.findByEmailForUpdate("chef@bistro.com")).thenReturn(Optional.of(restaurant));
 
         MessageResponseDto resp = enabledService.resetPasswordWithOtp(new ResetPasswordOtpDto("chef@bistro.com", "789123", "NewSecretPass@123"));
 
@@ -195,5 +203,19 @@ class OtpServiceTest {
         verify(otpRepository).save(otp);
         verify(restaurantRepository).save(restaurant);
         assertThat(passwordEncoder.matches("NewSecretPass@123", restaurant.getPasswordHash())).isTrue();
+        assertThat(restaurant.getStatus()).isEqualTo(status);
+    }
+
+    @Test
+    void resetRequestsAreBoundedByNormalizedEmailEvenWithoutAnActiveCode() {
+        ResetPasswordOtpDto request = new ResetPasswordOtpDto(" CHEF@BISTRO.COM ", "000000", "newPassword123!");
+        for (int i = 0; i < 10; i++) {
+            assertThatThrownBy(() -> enabledService.resetPasswordWithOtp(request))
+                    .isInstanceOf(InvalidFieldException.class);
+        }
+        assertThatThrownBy(() -> enabledService.resetPasswordWithOtp(
+                new ResetPasswordOtpDto("chef@bistro.com", "000000", "newPassword123!")))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("429");
+        verify(restaurantRepository, times(10)).findByEmailForUpdate("chef@bistro.com");
     }
 }

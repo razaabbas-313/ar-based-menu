@@ -112,7 +112,6 @@ public class AuthService {
             r.incrementTokenVersion();
             return restaurantRepository.save(r);
         });
-        restaurantAccess.invalidate(saved.getId());
         log.info("Restaurant {} ({}) set a new password", saved.getSlug(), saved.getId());
         return authResponse(saved);
     }

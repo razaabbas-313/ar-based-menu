@@ -4,7 +4,6 @@ import com.atelier.media.config.AtelierProperties;
 import com.atelier.media.dto.ForgotPasswordDto;
 import com.atelier.media.dto.MessageResponseDto;
 import com.atelier.media.dto.ResetPasswordOtpDto;
-import com.atelier.media.exception.ConflictException;
 import com.atelier.media.exception.InvalidFieldException;
 import com.atelier.media.model.PasswordResetOtp;
 import com.atelier.media.model.Restaurant;
@@ -16,7 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.security.SecureRandom;
@@ -37,9 +38,16 @@ public class OtpService {
     private final PasswordEncoder passwordEncoder;
     private final EmailSender emailSender;
     private final AtelierProperties props;
+    private final TransactionTemplate tx;
     private final SecureRandom random = new SecureRandom();
 
     private final Cache<String, Integer> ipOtpLimiter = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(15))
+            .maximumSize(10_000)
+            .build();
+
+    // Bound guesses across replacement codes as well as the durable five-attempt per-code cap.
+    private final Cache<String, Integer> resetLimiter = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofMinutes(15))
             .maximumSize(10_000)
             .build();
@@ -48,15 +56,18 @@ public class OtpService {
                       RestaurantRepository restaurantRepository,
                       PasswordEncoder passwordEncoder,
                       EmailSender emailSender,
-                      AtelierProperties props) {
+                      AtelierProperties props,
+                      PlatformTransactionManager transactionManager) {
         this.otpRepository = otpRepository;
         this.restaurantRepository = restaurantRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailSender = emailSender;
         this.props = props;
+        this.tx = new TransactionTemplate(transactionManager);
+        // Validation failures must stay committed even if a future caller rolls back its own work.
+        this.tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional
     public MessageResponseDto sendPasswordResetOtp(ForgotPasswordDto dto, String clientIp) {
         if (!props.passwordReset().enabled()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Password reset is not enabled.");
@@ -70,38 +81,31 @@ public class OtpService {
         }
 
         String email = AuthService.normalizeEmail(dto.email());
-        Optional<Restaurant> restaurant = restaurantRepository.findByEmail(email);
+        String code = tx.execute(status -> {
+            Optional<Restaurant> restaurant = restaurantRepository.findByEmailForUpdate(email);
+            // Preserve generic responses without granting recovery to unavailable accounts.
+            if (restaurant.isEmpty() || !canReset(restaurant.get())) return null;
 
-        // Enumeration-safe: always return the generic message even if email is not found or deleted
-        if (restaurant.isEmpty() || restaurant.get().isDeleted()) {
-            return new MessageResponseDto(GENERIC_OTP_SENT_MESSAGE);
-        }
+            Instant now = Instant.now();
+            Optional<PasswordResetOtp> activeOtp = otpRepository.findTopByEmailAndUsedFalseAndExpiresAtAfterOrderByCreatedAtDesc(email, now);
+            if (activeOtp.isPresent() && Duration.between(activeOtp.get().getCreatedAt(), now).getSeconds() < 60) {
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Please wait at least 60 seconds before requesting another verification code.");
+            }
 
-        // 60-second resend cooldown
-        Optional<PasswordResetOtp> activeOtp = otpRepository.findTopByEmailAndUsedFalseAndExpiresAtAfterOrderByCreatedAtDesc(email, Instant.now());
-        if (activeOtp.isPresent() && Duration.between(activeOtp.get().getCreatedAt(), Instant.now()).getSeconds() < 60) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Please wait at least 60 seconds before requesting another verification code.");
-        }
+            otpRepository.invalidateExistingOtps(email);
+            String generated = String.format("%06d", random.nextInt(1_000_000));
+            otpRepository.save(PasswordResetOtp.builder()
+                    .email(email).otpCode(passwordEncoder.encode(generated)).attempts(0)
+                    .expiresAt(now.plus(10, ChronoUnit.MINUTES)).used(false).build());
+            return generated;
+        });
 
-        otpRepository.invalidateExistingOtps(email);
-        String code = String.format("%06d", random.nextInt(1_000_000));
-        Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES);
-
-        PasswordResetOtp otp = PasswordResetOtp.builder()
-                .email(email)
-                .otpCode(passwordEncoder.encode(code))
-                .attempts(0)
-                .expiresAt(expiresAt)
-                .used(false)
-                .build();
-        otpRepository.save(otp);
-
-        emailSender.sendPasswordResetOtp(email, code);
+        // Delivery is outside the committed OTP transaction and its account lock.
+        if (code != null) emailSender.sendPasswordResetOtp(email, code);
 
         return new MessageResponseDto(GENERIC_OTP_SENT_MESSAGE);
     }
 
-    @Transactional
     public MessageResponseDto resetPasswordWithOtp(ResetPasswordOtpDto dto) {
         if (!props.passwordReset().enabled()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Password reset is not enabled.");
@@ -109,43 +113,54 @@ public class OtpService {
 
         String email = AuthService.normalizeEmail(dto.email());
         String code = dto.otp() != null ? dto.otp().strip() : "";
-
-        PasswordResetOtp otp = otpRepository.findTopByEmailAndUsedFalseAndExpiresAtAfterOrderByCreatedAtDesc(email, Instant.now())
-                .orElseThrow(() -> new InvalidFieldException("otp", "Invalid or expired verification code. Please request a new one."));
-
-        if (otp.getAttempts() >= 5) {
-            otp.setUsed(true);
-            otpRepository.save(otp);
-            throw new InvalidFieldException("otp", "Too many failed attempts. This verification code has been invalidated.");
+        if (resetLimiter.asMap().compute(email, (k, v) -> v == null ? 1 : v + 1) > 10) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many password reset attempts. Please try again later.");
         }
 
-        if (!passwordEncoder.matches(code, otp.getOtpCode())) {
-            otp.setAttempts(otp.getAttempts() + 1);
-            otp.setLastAttemptAt(Instant.now());
+        String failure = tx.execute(status -> {
+            // The same account lock is acquired before any OTP read/write on both entry paths.
+            Optional<Restaurant> found = restaurantRepository.findByEmailForUpdate(email);
+            if (found.isEmpty() || !canReset(found.get())) {
+                return "Invalid or expired verification code. Please request a new one.";
+            }
+            Restaurant restaurant = found.get();
+            PasswordResetOtp otp = otpRepository.findTopByEmailAndUsedFalseAndExpiresAtAfterOrderByCreatedAtDesc(email, Instant.now()).orElse(null);
+            if (otp == null) return "Invalid or expired verification code. Please request a new one.";
             if (otp.getAttempts() >= 5) {
                 otp.setUsed(true);
+                otpRepository.save(otp);
+                return "Too many failed attempts. This verification code has been invalidated.";
             }
+
+            if (!passwordEncoder.matches(code, otp.getOtpCode())) {
+                otp.setAttempts(otp.getAttempts() + 1);
+                otp.setLastAttemptAt(Instant.now());
+                if (otp.getAttempts() >= 5) otp.setUsed(true);
+                otpRepository.save(otp);
+                int remaining = Math.max(0, 5 - otp.getAttempts());
+                return remaining == 0
+                        ? "Too many failed attempts. This verification code has been invalidated."
+                        : "Incorrect verification code. " + remaining + " attempt(s) remaining.";
+            }
+
+            otp.setUsed(true);
             otpRepository.save(otp);
-            int remaining = Math.max(0, 5 - otp.getAttempts());
-            if (remaining == 0) {
-                throw new InvalidFieldException("otp", "Too many failed attempts. This verification code has been invalidated.");
-            }
-            throw new InvalidFieldException("otp", "Incorrect verification code. " + remaining + " attempt(s) remaining.");
-        }
+            otpRepository.invalidateExistingOtps(email);
+            restaurant.setPasswordHash(passwordEncoder.encode(dto.newPassword()));
+            restaurant.setMustChangePassword(false);
+            restaurant.setPasswordChangedAt(Instant.now());
+            restaurant.incrementTokenVersion();
+            restaurantRepository.save(restaurant);
+            return null;
+        });
+        // A validation exception inside tx would roll back the failure counter and lockout.
+        if (failure != null) throw new InvalidFieldException("otp", failure);
 
-        Restaurant restaurant = restaurantRepository.findByEmail(email)
-                .orElseThrow(() -> new ConflictException("email", "Restaurant account not found."));
-
-        otp.setUsed(true);
-        otpRepository.save(otp);
-
-        restaurant.setPasswordHash(passwordEncoder.encode(dto.newPassword()));
-        restaurant.setMustChangePassword(false);
-        restaurant.setPasswordChangedAt(Instant.now());
-        restaurant.incrementTokenVersion();
-        restaurantRepository.save(restaurant);
-
-        log.info("Password successfully reset via OTP for restaurant {} ({})", restaurant.getSlug(), email);
+        log.info("Password successfully reset via OTP");
         return new MessageResponseDto("Your password has been successfully reset. You can now sign in.");
+    }
+
+    private static boolean canReset(Restaurant restaurant) {
+        return !restaurant.isDeleted() && restaurant.getStatus().canUseStudio();
     }
 }

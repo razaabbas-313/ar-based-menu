@@ -50,7 +50,7 @@ class MediaServiceTest {
     private static final Tenant TENANT_A = new Tenant(A, "bistro-a");
 
     private final ServiceHarness h = new ServiceHarness();
-    private final MediaService service = new MediaService(h.mediaRepository, h.restaurantRepository, h.restaurantAccess,
+    private final MediaService service = new MediaService(h.mediaRepository, h.categoryRepository, h.restaurantRepository, h.restaurantAccess,
             h.storage, h.props, h.tx, h.menuCache);
 
     @AfterEach

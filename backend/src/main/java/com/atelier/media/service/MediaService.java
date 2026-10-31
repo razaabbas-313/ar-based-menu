@@ -6,6 +6,7 @@ import com.atelier.media.dto.PresignRequestDto;
 import com.atelier.media.dto.PresignResponseDto;
 import com.atelier.media.dto.UploadConfirmDto;
 import com.atelier.media.exception.InvalidMediaException;
+import com.atelier.media.exception.InvalidFieldException;
 import com.atelier.media.exception.MediaNotFoundException;
 import com.atelier.media.exception.UploadVerificationException;
 import com.atelier.media.model.DishCategory;
@@ -14,6 +15,7 @@ import com.atelier.media.model.MediaType;
 import com.atelier.media.model.Restaurant;
 import com.atelier.media.model.UploadStatus;
 import com.atelier.media.repository.MediaRepository;
+import com.atelier.media.repository.CategoryRepository;
 import com.atelier.media.repository.RestaurantRepository;
 import com.atelier.media.security.Tenant;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +42,7 @@ import java.util.List;
 public class MediaService {
 
     private final MediaRepository mediaRepository;
+    private final CategoryRepository categoryRepository;
     private final RestaurantRepository restaurantRepository;
     private final RestaurantAccess restaurantAccess;
     private final S3Storage storage;
@@ -47,7 +50,7 @@ public class MediaService {
     private final TransactionTemplate tx;
     private final MenuCache menuCache;
 
-    public MediaService(MediaRepository mediaRepository,
+    public MediaService(MediaRepository mediaRepository, CategoryRepository categoryRepository,
                         RestaurantRepository restaurantRepository,
                         RestaurantAccess restaurantAccess,
                         S3Storage storage,
@@ -55,6 +58,7 @@ public class MediaService {
                         TransactionTemplate tx,
                         MenuCache menuCache) {
         this.mediaRepository = mediaRepository;
+        this.categoryRepository = categoryRepository;
         this.restaurantRepository = restaurantRepository;
         this.restaurantAccess = restaurantAccess;
         this.storage = storage;
@@ -67,6 +71,10 @@ public class MediaService {
 
     public PresignResponseDto generatePresignedUploadUrl(Tenant tenant, PresignRequestDto request) {
         Restaurant restaurant = restaurantAccess.requireStudioAccess(tenant);
+        if (request.categoryId() != null) {
+            categoryRepository.findByIdAndRestaurantId(request.categoryId(), tenant.restaurantId())
+                    .orElseThrow(() -> new InvalidFieldException("categoryId", "Category not found."));
+        }
         storage.requireConfigured();
 
         String contentType = MediaRules.normalizeContentType(request.contentType());
