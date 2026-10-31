@@ -132,7 +132,7 @@ function qrSvg(matrix, x, y, sizePx, color) {
  * @param {string} [o.fontCss] optional @font-face CSS (embedded web font for exports)
  * @param {boolean} [o.physicalSize] set width/height in inches/mm (SVG download & print)
  */
-export function qrCardSvg({ matrix, name, url, theme = 'onyx', format = '4x6', fontCss = '', physicalSize = false }) {
+export function qrCardSvg({ matrix, name, url, theme = 'onyx', format = '4x6', fontCss = '', physicalSize = false, tagline }) {
   const t = QR_THEMES[theme] || QR_THEMES.onyx;
   const f = QR_FORMATS[format] || QR_FORMATS['4x6'];
   const W = f.w;
@@ -159,7 +159,7 @@ export function qrCardSvg({ matrix, name, url, theme = 'onyx', format = '4x6', f
   const dividerY = top + titleBlock + (square ? 26 : 34);
   const panelPad = square ? 30 : 40;
   const panelY = dividerY + (square ? 34 : 56);
-  const taglineLines = square ? [QR_TAGLINE] : ['Scan to Explore Our Menu', 'in 3D & Augmented Reality'];
+  const taglineLines = tagline ? [tagline] : square ? [QR_TAGLINE] : ['Scan to Explore Our Menu', 'in 3D & Augmented Reality'];
   const taglineSize = square ? 32 : 38;
   // Lay the footer out from the bottom up, then give the QR whatever height is left.
   const brandY = H - inset - (square ? 40 : 60);

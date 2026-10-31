@@ -40,6 +40,10 @@ import java.util.List;
 @Slf4j
 @Service
 public class MediaService {
+    private EntitlementService entitlements;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
+
 
     private final MediaRepository mediaRepository;
     private final CategoryRepository categoryRepository;
@@ -118,6 +122,8 @@ public class MediaService {
         Media saved = tx.execute(status -> {
             Restaurant locked = restaurantRepository.findByIdForUpdate(restaurant.getId())
                     .orElseThrow(() -> new com.atelier.media.exception.RestaurantNotFoundException(restaurant.getId()));
+            restaurantAccess.requireStudioAccess(tenant);
+            if(entitlements!=null)entitlements.requireDishCapacity(tenant.restaurantId(),false);
             long seq = locked.getNextDishSeq() == null ? 1L : locked.getNextDishSeq();
             locked.setNextDishSeq(seq + 1);
             restaurantRepository.save(locked);
@@ -157,6 +163,8 @@ public class MediaService {
         long mediaId = media.getId();
 
         Media saved = tx.execute(status -> {
+            restaurantRepository.findByIdForUpdate(tenant.restaurantId()).orElseThrow();
+            restaurantAccess.requireStudioAccess(tenant);
             Media fresh = mediaRepository.findByIdAndRestaurantId(mediaId, tenant.restaurantId())
                     .orElseThrow(() -> new MediaNotFoundException("This upload was removed."));
             if (fresh.getUploadStatus() == UploadStatus.COMPLETED) {
@@ -165,6 +173,7 @@ public class MediaService {
             if (fresh.getUploadStatus() == UploadStatus.FAILED) {
                 throw new UploadVerificationException("This upload token has expired. Please upload the file again.");
             }
+            if(entitlements!=null)entitlements.requireDishCapacity(tenant.restaurantId(),true);
             fresh.setUploadStatus(UploadStatus.COMPLETED);
             fresh.setEtag(etag);
             fresh.setFileSizeBytes(actualSize);

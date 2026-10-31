@@ -22,6 +22,7 @@ import {
 import AdminLogin from '../components/admin/AdminLogin.jsx';
 import ChangePasswordModal from '../components/admin/ChangePasswordModal.jsx';
 import KpiCards from '../components/admin/KpiCards.jsx';
+import PlansManager from '../components/admin/PlansManager.jsx';
 import RestaurantTable from '../components/admin/RestaurantTable.jsx';
 import RestaurantFormModal from '../components/admin/RestaurantFormModal.jsx';
 import RestaurantDrawer from '../components/admin/RestaurantDrawer.jsx';
@@ -282,6 +283,7 @@ function Console() {
           )}
         </section>
 
+        <div className="mb-4 sm:hidden"><label className="sr-only" htmlFor="admin-section">Administration section</label><select id="admin-section" value={mainTab} onChange={e => setMainTab(e.target.value)} className="w-full rounded-xl border border-white/10 bg-zinc-900 p-3 text-sm"><option value="restaurants">Restaurants & menus</option><option value="plans">Plans & capabilities</option><option value="3d">3D studio pipeline</option></select></div>
         {/* Section Navigation Tabs (Desktop) */}
         <div className="mb-6 hidden sm:flex gap-2 border-b hairline pb-4">
           <button
@@ -315,8 +317,10 @@ function Console() {
               </span>
             )}
           </button>
+          <button type="button" onClick={() => setMainTab('plans')} className={cx('tap flex h-11 items-center gap-2 rounded-full border px-5 text-sm font-semibold', mainTab === 'plans' ? 'border-amber-500 bg-amber-500 text-zinc-950' : 'hairline text-zinc-400 hover:text-zinc-100')}><ShieldCheck size={16} />Plans & capabilities</button>
         </div>
 
+        {mainTab === 'plans' && <PlansManager />}
         {mainTab === 'restaurants' && (
           <section>
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

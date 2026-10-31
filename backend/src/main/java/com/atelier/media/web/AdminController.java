@@ -189,10 +189,11 @@ public class AdminController {
 
     @PostMapping("/3d-requests/{dishId}/presign")
     public ResponseEntity<PresignResponseDto> presignFinishedModel(
+            @AuthenticationPrincipal Jwt jwt,
             @PathVariable long dishId,
             @Valid @RequestBody Attach3dRequestDto request) {
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
-                .body(modelRequestService.presignModelUpload(dishId, request));
+                .body(modelRequestService.presignModelUpload(dishId, request, AdminPrincipal.from(jwt)));
     }
 
     @PostMapping("/3d-requests/{dishId}/approve")

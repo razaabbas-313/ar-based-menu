@@ -54,6 +54,10 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class ModelRequestService {
+    private EntitlementService entitlements;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
+
 
     private static final Set<String> ALLOWED_SLOTS = Set.of("front", "top", "back", "left", "right");
 
@@ -107,7 +111,14 @@ public class ModelRequestService {
     }
 
     /** Presigns up to 5 reference photos for a 3D digital twin concierge request. */
-    public List<ModelRequestPresignResponseDto> presignPhotos(Long restaurantId, Long dishId, List<ModelRequestItemDto> items) {
+    public List<ModelRequestPresignResponseDto> presignPhotos(com.atelier.media.security.Tenant tenant,Long dishId,List<ModelRequestItemDto> items) {
+        restaurantAccess.requireStudioAccess(tenant);return presignPhotos(tenant.restaurantId(),dishId,items,tenant);
+    }
+    public List<ModelRequestPresignResponseDto> presignPhotos(Long restaurantId,Long dishId,List<ModelRequestItemDto> items) {
+        if(entitlements!=null)throw new com.atelier.media.exception.InvalidTokenException("Authenticated tenant required.");
+        return presignPhotos(restaurantId,dishId,items,null);
+    }
+    private List<ModelRequestPresignResponseDto> presignPhotos(Long restaurantId, Long dishId, List<ModelRequestItemDto> items,com.atelier.media.security.Tenant actor) {
         storage.requireConfigured();
         if (items == null || items.isEmpty() || items.size() > 5) {
             throw new InvalidMediaException("Model request requires between 1 and 5 reference photos.");
@@ -160,7 +171,8 @@ public class ModelRequestService {
                     .createdAt(Instant.now())
                     .build());
         }
-        pendingKeyRepository.saveAll(pendingKeys);
+        if(entitlements!=null)tx.executeWithoutResult(status->{restaurantRepository.findByIdForUpdate(restaurantId).orElseThrow();restaurantAccess.requireStudioAccess(actor);entitlements.requireConciergeCapacity(restaurantId);entitlements.requireModelCapacity(restaurantId,dishId,0,false);pendingKeyRepository.saveAll(pendingKeys);});
+        else pendingKeyRepository.saveAll(pendingKeys);
         return out;
     }
 
@@ -187,6 +199,7 @@ public class ModelRequestService {
         return tx.execute(status -> {
             Restaurant restaurant=restaurantRepository.findByIdForUpdate(restaurantId).orElseThrow(()->new RestaurantNotFoundException(restaurantId));
             restaurantAccess.requireStudioAccess(tenant);
+            if(entitlements!=null){entitlements.requireConciergeCapacity(restaurantId);entitlements.requireModelCapacity(restaurantId,dishId,0,false);}
             Media dish=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,restaurantId).orElseThrow(()->new MediaNotFoundException(dishId));
             if(!java.util.Objects.equals(snapshot.getVersion(),dish.getVersion()) || !before.getSlug().equals(restaurant.getSlug()) ||
                 "PENDING".equals(dish.getModelRequestStatus()) || "IN_PRODUCTION".equals(dish.getModelRequestStatus())) throw new ConflictException("dishId","Request state changed; refresh before confirming.");
@@ -216,6 +229,7 @@ public class ModelRequestService {
                     .requestedAt(Instant.now())
                     .build();
             modelRequestRepository.save(historyEntry);
+            if(entitlements!=null)entitlements.recordConcierge(restaurantId,dishId);
 
             for(var abandoned:fresh) if(!used.contains(abandoned.getS3Key())) cleanup.record(restaurantId,storage.bucket(),abandoned.getS3Key(),"UNSELECTED_REFERENCE");
             pendingKeyRepository.deleteByDishId(dishId);
@@ -257,7 +271,12 @@ public class ModelRequestService {
     }
 
     /** Super Admin: presigns finished .glb upload straight to S3 under restaurant namespace. */
-    public PresignResponseDto presignModelUpload(Long dishId, Attach3dRequestDto request) {
+    public PresignResponseDto presignModelUpload(Long dishId,Attach3dRequestDto request) {
+        if(entitlements!=null)throw new com.atelier.media.exception.InvalidTokenException("Authenticated administrator required.");
+        return presignModelUpload(dishId,request,null);
+    }
+    public PresignResponseDto presignModelUpload(Long dishId, Attach3dRequestDto request,AdminPrincipal actor) {
+        if(actor!=null)adminAccess.requireAccount(actor);
         storage.requireConfigured();
         String ct = MediaRules.normalizeContentType(request.contentType());
         if (!"model/gltf-binary".equals(ct) && !"application/octet-stream".equals(ct) && !"model/gltf+json".equals(ct)) {
@@ -271,7 +290,10 @@ public class ModelRequestService {
                 .orElseThrow(() -> new RestaurantNotFoundException(dish.getRestaurantId()));
         String s3Key = storage.newKey(restaurant.getSlug(), "models", "twin-", "glb");
         tx.executeWithoutResult(status -> {
-            restaurantRepository.findByIdForUpdate(restaurant.getId()).orElseThrow();
+            Restaurant lockedRestaurant=restaurantRepository.findByIdForUpdate(restaurant.getId()).orElseThrow();
+            if(actor!=null)adminAccess.requireAccountForUpdate(actor);
+            if(lockedRestaurant.isDeleted()||!lockedRestaurant.getStatus().canUseStudio())throw new ConflictException("status","Restaurant unavailable.");
+            if(entitlements!=null)entitlements.requireModelCapacity(restaurant.getId(),dishId,request.uploadSizeBytes(),false);
             Media current=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,restaurant.getId()).orElseThrow();
             current.setPendingModelS3Key(s3Key); current.setPendingModelSizeBytes(request.uploadSizeBytes());
             current.setPendingModelContentType(ct); current.setPendingModelCreatedAt(Instant.now());
@@ -297,6 +319,7 @@ public class ModelRequestService {
         return tx.execute(status -> {
             Restaurant restaurant=restaurantRepository.findByIdForUpdate(snapshot.getRestaurantId()).orElseThrow();
             adminAccess.requireAccountForUpdate(admin);
+            if(entitlements!=null)entitlements.requireModelCapacity(restaurant.getId(),dishId,modelSize,false);
             if(restaurant.isDeleted() || !restaurant.getStatus().canUseStudio()) throw new ConflictException("status","Restaurant is unavailable.");
             Media dish=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,snapshot.getRestaurantId()).orElseThrow(()->new MediaNotFoundException(dishId));
             if(!java.util.Objects.equals(snapshot.getVersion(),dish.getVersion()) || !before.getSlug().equals(restaurant.getSlug()) || !dto.s3Key().equals(dish.getPendingModelS3Key()) ||

@@ -4,6 +4,8 @@ import Navbar from '../components/Navbar.jsx';
 import MenuHero from '../components/guest/MenuHero.jsx';
 import CategoryNav from '../components/guest/CategoryNav.jsx';
 import GuestDishCard from '../components/guest/GuestDishCard.jsx';
+import GuestActions, { useGuestCart } from '../components/guest/GuestActions.jsx';
+import { addDish } from '../utils/guestOrders.js';
 import DishSheet from '../components/guest/DishSheet.jsx';
 import FilterBar from '../components/guest/FilterBar.jsx';
 import ArHandoffModal from '../components/ArHandoffModal.jsx';
@@ -20,6 +22,10 @@ const EMPTY_FILTERS = { tags: [], chefPicks: false, arOnly: false };
 export default function GuestMenuPage({ slug }) {
   const { restaurant: me } = useAuth();
   const { query: params } = useLocation();
+  const tableToken=params.get('table');
+  const [cart,setCart,notes,setNotes]=useGuestCart(slug,tableToken);
+  const [context,setContext]=useState(null);
+  const [cartNotice,setCartNotice]=useState('');
   const isOwner = me?.slug === slug;
   const isPreview = params.get('preview') === 'true';
   const [state, setState] = useState({ status: 'loading', restaurant: null, categories: [], items: [], error: '' });
@@ -40,11 +46,14 @@ export default function GuestMenuPage({ slug }) {
       .then((menu) => {
         setState({
           status: 'ready',
-          restaurant: { ...menu.restaurant, isMenuLive: menu.isMenuLive !== false },
+          restaurant: { ...menu.restaurant, isMenuLive: (menu.menuLive ?? menu.isMenuLive ?? true) !== false },
           categories: menu.categories || [],
           items: menu.items || [],
+          menuMode: menu.menuMode,
+          allowedModes: menu.allowedModes || ['SIMPLE','THREE_D','AR'],
           error: '',
         });
+        setOpen(current => current ? (menu.items || []).find(item => item.id === current.id) || null : null);
         if (!isOwner && !isPreview) {
           api.trackEvent({ slug, eventType: 'MENU_VIEW' }).catch(() => {});
         }
@@ -59,6 +68,9 @@ export default function GuestMenuPage({ slug }) {
     deepLinkDone.current = false;
     load();
   }, [load]);
+
+  useEffect(()=>{if(state.status!=='ready')return;let live=true;setContext(null);api.guestContext(slug,tableToken).then(value=>{if(live)setContext(value);}).catch(()=>{if(live)setContext({contextError:'Table and request availability could not be checked. Refresh the menu to try again.',orderingAvailable:false,waiterAvailable:false});});return()=>{live=false;};},[slug,tableToken,state.status,state.items]);
+  useEffect(()=>{if(state.menuMode==='SIMPLE')setFilters(f=>({...f,arOnly:false}));},[state.menuMode]);
 
   // Deep link from the AR hand-off QR code: /r/:slug?dish=<id>
   useEffect(() => {
@@ -310,8 +322,10 @@ export default function GuestMenuPage({ slug }) {
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] pb-32" style={accentStyle(r.themeAccent)}>
-      <MenuHero restaurant={r} dishCount={state.items.length} arCount={state.items.filter((i) => i.is3d).length} />
+      <MenuHero menuMode={state.menuMode} restaurant={r} dishCount={state.items.length} arCount={state.items.filter((i) => i.is3d).length} />
 
+      <GuestActions slug={slug} tableToken={tableToken} context={context} cart={cart} setCart={setCart} notes={notes} setNotes={setNotes} dishes={state.items} onRefresh={()=>{setContext(null);load();}} />
+      {cartNotice&&<p role="status" className="mx-auto max-w-3xl px-6 text-sm text-amber-200">{cartNotice}</p>}
       <div className="mt-8">
         <CategoryNav
           restaurantName={r.name}
@@ -396,18 +410,20 @@ export default function GuestMenuPage({ slug }) {
         <footer className="mt-14 border-t border-white/5 pb-6 pt-6 text-center">
           <div className="font-display text-lg italic text-zinc-500">{r.name}</div>
           <a {...linkProps('/')} className="mt-1 inline-block font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600 hover:text-zinc-400">
-            Menu in 3D &amp; AR by Atelier
+            Menu by Atelier
           </a>
         </footer>
       </main>
 
       {state.items.length > 0 && (
-        <FilterBar query={query} onQuery={setQuery} filters={filters} onFilters={setFilters} resultCount={visible.length} />
+        <FilterBar menuMode={state.menuMode} query={query} onQuery={setQuery} filters={filters} onFilters={setFilters} resultCount={visible.length} />
       )}
 
       {open && (
         <DishSheet
           item={open}
+          arAllowed={state.menuMode ? state.menuMode==='AR' : (state.allowedModes || ['SIMPLE','THREE_D','AR']).includes('AR')}
+          onAddToCart={context?.orderingAvailable ? item=>{try{setCart(addDish(cart,item));setCartNotice(`${item.dishTitle} added. Open Your request above the menu to review.`);closeSheet();}catch(e){setCartNotice(e.message);}} : undefined}
           slug={slug}
           currency={r.currencyCode}
           currencySymbol={r.currencySymbol}
@@ -415,7 +431,7 @@ export default function GuestMenuPage({ slug }) {
           onArFallback={setHandoff}
         />
       )}
-      {handoff && <ArHandoffModal item={handoff} slug={slug} onClose={() => setHandoff(null)} />}
+      {handoff && (state.menuMode ? state.menuMode==='AR' : (state.allowedModes || ['SIMPLE','THREE_D','AR']).includes('AR')) && <ArHandoffModal item={handoff} slug={slug} tableToken={tableToken} onClose={() => setHandoff(null)} />}
     </div>
   );
 }

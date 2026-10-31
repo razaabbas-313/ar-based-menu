@@ -6,13 +6,14 @@ import { IconButton, Overlay } from './ui.jsx';
  * Desktop / non-AR fallback: a QR code that opens this exact dish on a phone, where
  * "View in Your Space" launches Quick Look (iOS) or WebXR / Scene Viewer (Android).
  */
-export default function ArHandoffModal({ item, slug, onClose }) {
+export default function ArHandoffModal({ item, slug, onClose, tableToken }) {
   const [qr, setQr] = useState(null);
   const url = useMemo(() => {
     const u = new URL(`/r/${encodeURIComponent(slug)}`, window.location.origin);
     u.searchParams.set('dish', String(item.id));
+    if(/^[A-Za-z0-9_-]{43}$/.test(tableToken||''))u.searchParams.set('table',tableToken);
     return u.toString();
-  }, [item, slug]);
+  }, [item, slug, tableToken]);
 
   const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
   const insecure = window.location.protocol !== 'https:' && !isLocal;

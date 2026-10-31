@@ -37,6 +37,10 @@ import java.util.Set;
 @Slf4j
 @Service
 public class DishService {
+    private EntitlementService entitlements;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
+
 
     private static final String LEGACY_3D_ONLY =
             "This dish was created as 3D-only in an earlier version and has no photo. Add a photo first (Update Visual Asset), then manage its 3D model.";
@@ -169,7 +173,7 @@ public class DishService {
     /** Step 1 of attach/replace: presigned PUT for a .glb linked to this dish (pending until confirmed). */
     public PresignResponseDto requestModelUpload(Tenant tenant, long id, Attach3dRequestDto request) {
         Restaurant restaurant = restaurantAccess.requireStudioAccess(tenant);
-        if (!Boolean.TRUE.equals(restaurant.getCanUpload3d())) {
+        if (entitlements==null && !Boolean.TRUE.equals(restaurant.getCanUpload3d())) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "Direct 3D model uploads are not enabled for this restaurant. Please request a 3D model through the 3D Concierge.");
         }
@@ -182,6 +186,9 @@ public class DishService {
         String key = storage.newKey(restaurant.getSlug(), MediaType.MODEL_3D.keySegment(), "", extension);
         String[] previousPending = new String[1];
         Media dish = tx.execute(status -> {
+            restaurantRepository.findByIdForUpdate(tenant.restaurantId()).orElseThrow();
+            restaurantAccess.requireStudioAccess(tenant);
+            if(entitlements!=null)entitlements.requireModelCapacity(tenant.restaurantId(),id,request.uploadSizeBytes(),true);
             Media d = requireCompletedDish(tenant, id);
             if (d.isLegacyModelOnly()) {
                 throw new ConflictException("model", LEGACY_3D_ONLY);
@@ -205,7 +212,7 @@ public class DishService {
     /** Step 2: S3 HEAD outside any transaction, then swap the model in and adjust counters atomically. */
     public MediaResponseDto confirmModelUpload(Tenant tenant, long id, ModelConfirmDto confirm) {
         Restaurant restaurant = restaurantAccess.requireStudioAccess(tenant);
-        if (!Boolean.TRUE.equals(restaurant.getCanUpload3d())) {
+        if (entitlements==null && !Boolean.TRUE.equals(restaurant.getCanUpload3d())) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "Direct 3D model uploads are not enabled for this restaurant.");
         }
@@ -227,6 +234,9 @@ public class DishService {
 
         String[] replacedKey = new String[1];
         Media saved = tx.execute(status -> {
+            restaurantRepository.findByIdForUpdate(tenant.restaurantId()).orElseThrow();
+            restaurantAccess.requireStudioAccess(tenant);
+            if(entitlements!=null)entitlements.requireModelCapacity(tenant.restaurantId(),id,actualSize,true);
             Media d = mediaRepository.findByIdAndRestaurantId(id, tenant.restaurantId()).orElseThrow(() -> notFound(id));
             if (!confirm.s3Key().equals(d.getPendingModelS3Key())) {
                 throw new UploadVerificationException("This 3D upload is no longer pending. Please attach the model again.");

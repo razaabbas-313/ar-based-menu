@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CircleCheck, LoaderCircle, Save, Store, TriangleAlert, X } from 'lucide-react';
 import { Field, IconButton, Overlay, inputClass, primaryButtonClass } from '../ui.jsx';
+import ProvisioningPlanFields from './ProvisioningPlanFields.jsx';
 import TemporaryPasswordModal from './TemporaryPasswordModal.jsx';
 import { api } from '../../api/client.js';
 import { cx, slugify } from '../../utils/format.js';
@@ -14,6 +15,7 @@ const STATUSES = ['ACTIVE', 'TRIAL', 'PENDING'];
  */
 export default function RestaurantFormModal({ restaurant, onClose, onSaved }) {
   const editing = !!restaurant;
+  const [provisioning, setProvisioning] = useState({ planRevisionId: null, initialOverrides: {} });
   const [form, setForm] = useState({
     name: restaurant?.name || '',
     slug: restaurant?.slug || '',
@@ -66,13 +68,13 @@ export default function RestaurantFormModal({ restaurant, onClose, onSaved }) {
         slug,
         ownerName: form.ownerName.trim(),
         email: form.email.trim(),
-        canUpload3d: form.canUpload3d,
+        ...(!editing || form.canUpload3d !== !!restaurant.canUpload3d ? { canUpload3d: form.canUpload3d } : {}),
       };
       if (editing) {
         const saved = await api.adminUpdateRestaurant(restaurant.id, base);
         onSaved(saved, `${saved.name} updated`);
       } else {
-        const res = await api.adminCreateRestaurant({ ...base, phoneNumber: form.phoneNumber.trim() || null, status: form.status, canUpload3d: form.canUpload3d });
+        const res = await api.adminCreateRestaurant({ ...base, ...provisioning, phoneNumber: form.phoneNumber.trim() || null, status: form.status, canUpload3d: form.canUpload3d });
         setCreated(res);
       }
     } catch (err) {
@@ -142,6 +144,7 @@ export default function RestaurantFormModal({ restaurant, onClose, onSaved }) {
               <input className={inputClass} type="email" maxLength={160} value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="owner@restaurant.com" />
             </Field>
           </div>
+          {!editing && !provisioning.planRevisionId && (
           <div className="flex items-center justify-between rounded-2xl border hairline bg-black/30 p-3.5">
             <div className="pr-3">
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
@@ -170,6 +173,7 @@ export default function RestaurantFormModal({ restaurant, onClose, onSaved }) {
               />
             </button>
           </div>
+          )}
           {!editing && (
             <>
               <Field label="Contact phone (optional)" error={fieldErrors.phoneNumber} hint="Shown on the guest menu as a “Call” button.">
@@ -195,6 +199,7 @@ export default function RestaurantFormModal({ restaurant, onClose, onSaved }) {
               </p>
             </>
           )}
+          {!editing && <ProvisioningPlanFields onChange={setProvisioning} canUpload3d={form.canUpload3d} />}
           {error && (
             <div className="flex gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200" role="alert">
               <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />

@@ -40,7 +40,7 @@ public class RestaurantController {
                 .filter(m -> !arOnly || m.hasArSupport())
                 .toList();
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(Duration.ofSeconds(15)).cachePublic().staleWhileRevalidate(Duration.ofSeconds(60)))
+                .cacheControl(CacheControl.noStore())
                 .body(new PublicMenuDto(menu.restaurant(), items));
     }
 }

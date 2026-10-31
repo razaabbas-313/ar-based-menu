@@ -19,9 +19,9 @@ import {
  * One branded QR for the whole venue (not per table): live preview, Dark Onyx & Gold or Crisp
  * White themes, and exports (PNG 2000×2000, vector SVG, print-ready 4×6" / A6 PDF).
  */
-export default function RestaurantQrModal({ restaurant, onClose }) {
+export default function RestaurantQrModal({ restaurant, onClose, urlOverride, tableLabel }) {
   const toast = useToast();
-  const url = useMemo(() => menuUrl(restaurant.slug), [restaurant.slug]);
+  const url = useMemo(() => urlOverride || menuUrl(restaurant.slug), [restaurant.slug,urlOverride]);
   const [matrix, setMatrix] = useState(null);
   const [error, setError] = useState('');
   const [theme, setTheme] = useState('onyx');
@@ -40,14 +40,14 @@ export default function RestaurantQrModal({ restaurant, onClose }) {
   }, [url]);
 
   const preview = useMemo(
-    () => (matrix ? qrCardSvg({ matrix, name: restaurant.name, url, theme, format }) : ''),
-    [matrix, restaurant.name, url, theme, format],
+    () => (matrix ? qrCardSvg({ matrix, name: tableLabel ? `${restaurant.name} · ${tableLabel}` : restaurant.name, tagline: "Scan to view the menu", url, theme, format }) : ''),
+    [matrix, restaurant.name, tableLabel, url, theme, format],
   );
   const fileBase = `${slugify(restaurant.name) || restaurant.slug}-menu-qr-${theme}`;
 
   async function exportSvg(physical, targetFormat = format) {
     const fontCss = await embeddedFontCss(restaurant.name);
-    return qrCardSvg({ matrix, name: restaurant.name, url, theme, format: targetFormat, fontCss, physicalSize: physical });
+    return qrCardSvg({ matrix, name: tableLabel ? `${restaurant.name} · ${tableLabel}` : restaurant.name, tagline: "Scan to view the menu", url, theme, format: targetFormat, fontCss, physicalSize: physical });
   }
 
   async function downloadPng() {

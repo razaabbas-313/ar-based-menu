@@ -41,7 +41,7 @@ public class PublicMenuController {
     public ResponseEntity<PublicMenuDto> menu(@PathVariable String slug) {
         String cleanSlug = normalize(slug);
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(Duration.ofSeconds(15)).cachePublic().staleWhileRevalidate(Duration.ofSeconds(60)))
+                .cacheControl(CacheControl.noStore())
                 .body(publicMenuService.getMenu(cleanSlug));
     }
 

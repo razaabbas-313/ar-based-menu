@@ -32,6 +32,11 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class PublicMenuService {
+    private GuestExperienceService experience;
+    @org.springframework.beans.factory.annotation.Autowired public void setGuestExperience(GuestExperienceService service){experience=service;}
+    private EntitlementService entitlements;
+    @org.springframework.beans.factory.annotation.Autowired public void setEntitlements(EntitlementService service){entitlements=service;}
+
 
     private final RestaurantRepository restaurantRepository;
     private final MediaRepository mediaRepository;
@@ -56,8 +61,6 @@ public class PublicMenuService {
     }
 
     /** Unknown, suspended or deleted restaurants answer 404. Respects isMenuLive master switch. */
-    @Cacheable(cacheNames = CacheConfig.MENU_CACHE, key = "#slug")
-    @Transactional(readOnly = true)
     public PublicMenuDto getMenu(String slug) {
         Restaurant restaurant = restaurantRepository.findBySlug(slug)
                 .filter(Restaurant::isPubliclyVisible)
@@ -94,18 +97,19 @@ public class PublicMenuService {
         }).toList();
 
         log.debug("Menu cache miss for {}: {} dish(es)", slug, items.size());
-        return new PublicMenuDto(RestaurantBrandingDto.from(restaurant), items, categoryDtos, true);
+        List<String> modes=entitlements==null?List.of("SIMPLE","THREE_D","AR"):entitlements.allowedModes(restaurant.getId()).stream().map(Object::toString).toList();
+        String mode=experience==null?(modes.contains("AR")?"AR":modes.contains("THREE_D")?"THREE_D":"SIMPLE"):experience.selectedMode(restaurant.getId(),modes);
+        items=items.stream().map(item->item.restrictModes(!"SIMPLE".equals(mode),"AR".equals(mode))).toList();
+        return new PublicMenuDto(RestaurantBrandingDto.from(restaurant), items, categoryDtos, true,modes,mode);
     }
 
     /** Authenticated staff preview bypasses the live/private filter. */
-    @Transactional(readOnly = true)
     public PublicMenuDto getStaffPreview(String slug) {
         Restaurant restaurant = restaurantRepository.findBySlug(slug)
                 .orElseThrow(() -> new RestaurantNotFoundException(slug));
         return buildStaffPreview(restaurant);
     }
 
-    @Transactional(readOnly = true)
     public PublicMenuDto getStaffPreview(Long restaurantId) {
         Restaurant restaurant = restaurantRepository.findById(restaurantId)
                 .orElseThrow(() -> new RestaurantNotFoundException(restaurantId));
@@ -135,6 +139,9 @@ public class PublicMenuService {
             return DishMapper.toDto(m, catName);
         }).toList();
 
-        return new PublicMenuDto(RestaurantBrandingDto.from(restaurant), items, categoryDtos, true);
+        List<String> modes=entitlements==null?List.of("SIMPLE","THREE_D","AR"):entitlements.allowedModes(restaurant.getId()).stream().map(Object::toString).toList();
+        String mode=experience==null?"AR":experience.selectedMode(restaurant.getId(),modes);
+        items=items.stream().map(item->item.restrictModes(!"SIMPLE".equals(mode),"AR".equals(mode))).toList();
+        return new PublicMenuDto(RestaurantBrandingDto.from(restaurant), items, categoryDtos, true,modes,mode);
     }
 }

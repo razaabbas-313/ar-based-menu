@@ -4,7 +4,7 @@ import { IconButton, Overlay } from '../ui.jsx';
 import { buzz, cx } from '../../utils/format.js';
 
 /** Sticky bottom search + experience filter drawer. */
-export default function FilterBar({ query, onQuery, filters, onFilters, resultCount }) {
+export default function FilterBar({ query, onQuery, filters, onFilters, resultCount, menuMode }) {
   const [open, setOpen] = useState(false);
   const activeCount = (filters.chefPicks ? 1 : 0) + (filters.arOnly ? 1 : 0);
 
@@ -59,9 +59,9 @@ export default function FilterBar({ query, onQuery, filters, onFilters, resultCo
               <Chip active={filters.chefPicks} onClick={() => onFilters({ ...filters, chefPicks: !filters.chefPicks })} icon={Crown}>
                 Chef picks
               </Chip>
-              <Chip active={filters.arOnly} onClick={() => onFilters({ ...filters, arOnly: !filters.arOnly })} icon={Box}>
-                3D &amp; AR only
-              </Chip>
+              {menuMode!=='SIMPLE' && <Chip active={filters.arOnly} onClick={() => onFilters({ ...filters, arOnly: !filters.arOnly })} icon={Box}>
+                {menuMode==='THREE_D'?'3D models only':'3D & AR only'}
+              </Chip>}
             </div>
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button

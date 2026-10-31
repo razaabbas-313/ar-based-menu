@@ -17,3 +17,9 @@ export function loadModelViewer() {
 export function preloadModelViewer() {
   loadModelViewer().catch(() => {});
 }
+
+/** Keep React 18 custom-element flags synchronized, including removal after a policy change. */
+export function setViewerFlags(element, { arEnabled = true, autoRotate = true, isCard = false }) {
+  const flags={ar: arEnabled, 'camera-controls':true, 'xr-environment':arEnabled, 'auto-rotate':autoRotate, 'disable-zoom':isCard, 'disable-pan':isCard};
+  Object.entries(flags).forEach(([name,on])=>element.toggleAttribute(name,!!on));
+}

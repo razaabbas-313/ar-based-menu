@@ -21,8 +21,13 @@ public record AdminRestaurantCreateDto(
         @NotBlank @Email @Size(max = 160) String email,
         @Pattern(regexp = "^$|^\\+?[0-9 ()\\-]{6,30}$", message = "use digits, spaces, + ( ) -") String phoneNumber,
         RestaurantStatus status,
-        Boolean canUpload3d
+        Boolean canUpload3d,
+        Long planRevisionId,
+        java.util.Map<String,Object> initialOverrides
 ) {
+    public AdminRestaurantCreateDto(String name,String slug,String ownerName,String email,String phoneNumber,RestaurantStatus status,Boolean canUpload3d) {
+        this(name,slug,ownerName,email,phoneNumber,status,canUpload3d,null,null);
+    }
     public AdminRestaurantCreateDto(String name, String slug, String ownerName, String email, String phoneNumber, RestaurantStatus status) {
         this(name, slug, ownerName, email, phoneNumber, status, false);
     }
