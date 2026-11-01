@@ -226,3 +226,22 @@ input[type='range']::-moz-range-thumb {
 .kpi-glow {
   box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.18), 0 18px 50px -24px rgba(245, 158, 11, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
+
+/* Published Brand Studio tokens. Values come only from the curated, validated schema. */
+.atelier-menu { background:var(--brand-bg,#0a0a0c); color:var(--brand-text,#f6efdf); }
+.atelier-menu .font-display { font-family:var(--brand-heading,Georgia,serif); color:var(--brand-text,#f6efdf); }
+.atelier-menu .bg-onyx,.atelier-menu [class*="bg-[#161719]"],.atelier-menu [class*="bg-[#171719]"] { background:var(--brand-surface,#18181b); }
+.atelier-menu [class*="text-zinc-300"],.atelier-menu [class*="text-zinc-200"],.atelier-menu [class*="text-[#f6efdf]"] { color:var(--brand-text,#f6efdf); }
+.atelier-menu [class*="text-zinc-400"],.atelier-menu [class*="text-zinc-500"] { color:var(--brand-text,#b7b4af); }
+.atelier-menu button,.atelier-menu a { border-radius:var(--brand-radius,20px); transition-duration:var(--brand-motion,150ms); }
+.atelier-menu[data-card="outlined"] article,.atelier-menu[data-card="outlined"] [data-testid="guest-dish"] { box-shadow:none; border:1px solid currentColor; }
+.atelier-menu[data-category="underline"] nav button { border-radius:0; border-bottom:2px solid var(--brand-accent,#e6c36a); }
+.atelier-menu[data-motion="reduced"] *, .atelier-menu[data-motion="reduced"] *::before,.atelier-menu[data-motion="reduced"] *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+
+.atelier-menu [data-testid="guest-dish"] { background:var(--brand-surface,#111113); }
+.atelier-menu button[class*="bg-gradient"],.atelier-menu .bg-amber-300 { background:var(--brand-accent,#fcd34d); color:var(--brand-onaccent,#111111); }
+
+.atelier-menu[data-theme] [data-brand-head] { background:var(--brand-bg); padding-top:20px; border-radius:28px 28px 0 0; }
+
+.atelier-menu [class*="text-accent-"] { color:var(--brand-accent,rgb(var(--accent-300))); }
+.atelier-menu [class*="text-zinc-600"],.atelier-menu [class*="text-zinc-700"] { color:var(--brand-text,#a1a1aa); }

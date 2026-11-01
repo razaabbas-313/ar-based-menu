@@ -32,6 +32,7 @@ public class DurableCleanup {
         Instant now=Instant.now();
         db.update("insert into s3_cleanup_tasks(id,restaurant_id,bucket,object_key,tenant_slug,reason,state,attempts,available_at,created_at) values(?,?,?,?,?,?,'READY',0,?,?) on conflict do nothing",
                 UUID.randomUUID().toString(),tenant,bucket,key,slug,reason,Timestamp.from(now.plus(props.presignTtl()).plus(Duration.ofHours(1))),Timestamp.from(now));
+        if("TENANT_BRAND_REMOVED".equals(reason))db.update("update s3_cleanup_tasks set state='READY',reason='TENANT_BRAND_REMOVED',available_at=? where bucket=? and object_key=? and state='HELD' and reason='RETAINED_BRAND_IMAGE'",Timestamp.from(now.plus(props.presignTtl()).plus(Duration.ofHours(1))),bucket,key);
         if("RETAINED_MODEL".equals(reason)) db.update("update s3_cleanup_tasks set reason='RETAINED_MODEL',state='HELD' where bucket=? and object_key=?",bucket,key);
     }
     public boolean isRetired(String key) {
@@ -95,6 +96,8 @@ public class DurableCleanup {
         live+=db.queryForObject("select count(*) from model_request_pending_keys where s3_key=?",Long.class,t.key());
         // Models are retained by history regardless of status. No new retention/purge policy is inferred.
         live+=db.queryForObject("select count(*) from model_requests where completed_model_key=?",Long.class,t.key());
+        live+=db.queryForObject("select count(*) from model_versions where object_key=? and retention='HELD'",Long.class,t.key());
+        live+=db.queryForObject("select count(*) from brand_studio_assets where object_key=? and (state='VERIFIED' or (state='ISSUED' and expires_at>CURRENT_TIMESTAMP))",Long.class,t.key());
         if(live>0) return false;
         // Parse exact keys: LIKE/substring checks can mistake keys embedded in URLs and cannot establish ownership.
         if(referencesContain("media_details","model_request_photos",t.key()) || referencesContain("model_requests","reference_photos",t.key())) return false;

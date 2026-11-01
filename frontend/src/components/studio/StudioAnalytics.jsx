@@ -55,33 +55,33 @@ export default function StudioAnalytics() {
   const kpis = [
     {
       key: 'menuViews',
-      label: 'Guest Menu Scans',
+      label: 'Legacy menu events',
       value: (data?.totalMenuViews || 0).toLocaleString(),
-      sub: 'Total menu visits by guests',
+      sub: 'Historical MENU_VIEW observations, not physical scans',
       icon: Eye,
       tone: 'amber',
     },
     {
       key: 'engagementRate',
-      label: '3D Interaction Rate',
+      label: 'Legacy model/menu ratio',
       value: `${(data?.engagement3dRatePercent || 0).toFixed(1)}%`,
-      sub: 'Guests who engaged in 3D',
+      sub: 'Cumulative model clicks / menu events; may exceed 100%',
       icon: TrendingUp,
       tone: 'emerald',
     },
     {
       key: 'modelViews',
-      label: '3D Dish Explorations',
+      label: 'Legacy 3D control clicks',
       value: (data?.totalModelViews || 0).toLocaleString(),
-      sub: 'Total 3D models viewed',
+      sub: 'Historical MODEL_3D_VIEW intents',
       icon: Box,
       tone: 'amber',
     },
     {
       key: 'arLaunches',
-      label: 'Table AR Projections',
+      label: 'Legacy AR attempts',
       value: (data?.totalArLaunches || 0).toLocaleString(),
-      sub: 'Live AR dishes placed on tables',
+      sub: 'Launch attempts; placement is unverified',
       icon: Smartphone,
       tone: 'emerald',
     },
@@ -93,9 +93,9 @@ export default function StudioAnalytics() {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-500/80">
-            Real-Time Dining Engagement
+            Historical cumulative counters
           </div>
-          <h2 className="font-display text-3xl font-semibold text-zinc-100">Guest Experience Analytics</h2>
+          <h2 className="font-display text-3xl font-semibold text-zinc-100">Legacy Analytics</h2>
         </div>
         <button
           type="button"
@@ -145,14 +145,14 @@ export default function StudioAnalytics() {
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <UtensilsCrossed size={18} className="text-amber-400" />
-            <h3 className="font-display text-xl font-semibold text-zinc-100">Top 5 Most-Viewed Dishes</h3>
+            <h3 className="font-display text-xl font-semibold text-zinc-100">Legacy dish counters</h3>
           </div>
-          <span className="text-xs text-zinc-500">Ranked by guest attention</span>
+          <span className="text-xs text-zinc-500">Historical counters; zero ties are not a ranking</span>
         </div>
 
         {!data?.topDishes || data.topDishes.length === 0 ? (
           <div className="rounded-2xl border border-dashed hairline py-12 text-center text-sm text-zinc-500">
-            No guest interactions recorded yet. Scan your restaurant QR code to generate analytics.
+            No guest interactions recorded yet. Guest observations appear after accepted activity.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -163,7 +163,7 @@ export default function StudioAnalytics() {
                   <th className="pb-3 font-semibold">Dish</th>
                   <th className="pb-3 text-right font-semibold">Card Views</th>
                   <th className="pb-3 text-right font-semibold">3D Opens</th>
-                  <th className="pb-3 pr-2 text-right font-semibold">AR Placements</th>
+                  <th className="pb-3 pr-2 text-right font-semibold">AR attempts</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60">

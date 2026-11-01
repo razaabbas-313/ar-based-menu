@@ -8,16 +8,19 @@ import { safeHttpUrl } from '../../utils/format.js';
  * logo, serif title with the verified atelier badge, tagline, service details, bio, and the
  * swipeable social / contact bar directly beneath.
  */
-export default function MenuHero({ restaurant, dishCount = 0, arCount = 0, menuMode }) {
+export default function MenuHero({ restaurant, dishCount = 0, arCount = 0, menuMode, reducedMotion=false }) {
   const [bioOpen, setBioOpen] = useState(false);
   const cover = useRef(null);
-  const banner = safeHttpUrl(restaurant.bannerUrl);
-  const logo = safeHttpUrl(restaurant.logoUrl);
+  const [bannerFailed,setBannerFailed]=useState(false),[logoFailed,setLogoFailed]=useState(false);
+  useEffect(()=>setBannerFailed(false),[restaurant.bannerUrl]);
+  useEffect(()=>setLogoFailed(false),[restaurant.logoUrl]);
+  const banner = !bannerFailed&&safeHttpUrl(restaurant.bannerUrl);
+  const logo = !logoFailed&&safeHttpUrl(restaurant.logoUrl);
 
   // Parallax: the cover drifts at ~35% of the scroll speed (disabled for reduced motion).
   useEffect(() => {
     const el = cover.current;
-    if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
+    if (!el || reducedMotion || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
     let frame = 0;
     const onScroll = () => {
       cancelAnimationFrame(frame);
@@ -31,27 +34,27 @@ export default function MenuHero({ restaurant, dishCount = 0, arCount = 0, menuM
       cancelAnimationFrame(frame);
       window.removeEventListener('scroll', onScroll);
     };
-  }, []);
+  }, [reducedMotion]);
 
   return (
     <header className="relative">
       <div className="relative h-[17rem] overflow-hidden sm:h-80 lg:h-[26rem]">
         <div ref={cover} className="absolute inset-0 will-change-transform">
           {banner ? (
-            <img src={banner} alt="" className="h-full w-full object-cover" fetchpriority="high" decoding="async" />
+            <img src={banner} onError={()=>setBannerFailed(true)} alt="" className="h-full w-full object-cover" fetchpriority="high" decoding="async" />
           ) : (
             <div className="ambient absolute inset-0" />
           )}
         </div>
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/10 to-[#0a0a0c]" />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#0a0a0c] to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-24" style={{background:'linear-gradient(to top,var(--brand-bg,#0a0a0c),transparent)'}} />
       </div>
 
-      <div className="relative mx-auto -mt-20 max-w-3xl px-4 sm:-mt-24 sm:px-6">
+      <div data-brand-head className="relative mx-auto -mt-20 max-w-3xl px-4 sm:-mt-24 sm:px-6">
         <div className="flex items-end gap-4">
           <div className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-[26px] border border-white/15 bg-[#121214] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.9)] ring-1 ring-accent-400/30 sm:h-28 sm:w-28">
             {logo ? (
-              <img src={logo} alt={`${restaurant.name} logo`} className="h-full w-full object-cover" />
+              <img src={logo} onError={()=>setLogoFailed(true)} alt={`${restaurant.name} logo`} className="h-full w-full object-cover" />
             ) : (
               <span className="font-display text-5xl font-semibold italic text-accent-300">{restaurant.name.charAt(0)}</span>
             )}

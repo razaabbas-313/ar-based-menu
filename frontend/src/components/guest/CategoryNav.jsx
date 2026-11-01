@@ -6,7 +6,7 @@ import { CATEGORY_LABEL, buzz, cx } from '../../utils/format.js';
  * Sticky glass sub-header with horizontal category pills, a sliding active indicator, mobile
  * auto-scrolling to keep the active pill in view, and a "3D Only" toggle.
  */
-export default function CategoryNav({ categories, active, onSelect, restaurantName }) {
+export default function CategoryNav({ categories, active, onSelect, restaurantName, reducedMotion=false }) {
   const rail = useRef(null);
   const [indicator, setIndicator] = useState(null);
 
@@ -21,10 +21,10 @@ export default function CategoryNav({ categories, active, onSelect, restaurantNa
     const measure = () => setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
     measure();
     const left = el.offsetLeft - r.clientWidth / 2 + el.clientWidth / 2;
-    r.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    r.scrollTo({ left: Math.max(0, left), behavior: reducedMotion||window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth' });
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [active, categories.length]);
+  }, [active, categories.length,reducedMotion]);
 
   if (!categories || categories.length === 0) return null;
   return (

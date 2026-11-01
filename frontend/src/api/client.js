@@ -103,6 +103,23 @@ async function request(path, { method = 'GET', body, auth = null, timeout = 1500
 }
 
 export const api = {
+  recordInsight: body=>request('/api/v1/public/insights/event',{method:'POST',body,fresh:true}),
+  insights:(from,to)=>request('/api/v1/studio/insights'+toQuery({from,to}),{auth:R}),
+  platformInsights:(from,to)=>request('/api/v1/admin/insights'+toQuery({from,to}),{auth:A}),
+  draftImagePresign:(purpose,body)=>request('/api/v1/studio/appearance/assets/'+purpose+'/presign',{method:'POST',body,auth:R}),
+  draftImageConfirm:id=>request('/api/v1/studio/appearance/assets/'+id+'/confirm',{method:'POST',auth:R}),
+  studioModelRequests:()=>request('/api/v1/studio/model-requests',{auth:R}),
+  appearance: () => request('/api/v1/studio/appearance',{auth:R}),
+  saveAppearance: (expectedVersion,values) => request('/api/v1/studio/appearance/draft',{method:'PUT',body:{expectedVersion,values},auth:R}),
+  publishAppearance: expectedVersion => request('/api/v1/studio/appearance/publish',{method:'POST',body:{expectedVersion},auth:R}),
+  discardAppearance: expectedVersion => request('/api/v1/studio/appearance/discard',{method:'POST',body:{expectedVersion},auth:R}),
+  reviewSettings: () => request('/api/v1/studio/reviews',{auth:R}),
+  saveReviewSettings: body => request('/api/v1/studio/reviews',{method:'PUT',body,auth:R}),
+  publicAppearance: slug => request('/api/v1/public/appearance/'+encodeURIComponent(slug),{fresh:true}),
+  modelHistory: (dishId,after=0) => request('/api/v1/studio/dishes/'+dishId+'/model-history?after='+after,{auth:R}),
+  adminModelHistory: (restaurantId,dishId,after=0) => request('/api/v1/admin/restaurants/'+restaurantId+'/dishes/'+dishId+'/model-history?after='+after,{auth:A}),
+  adminDirectModelPresign: (restaurantId,dishId,body) => request('/api/v1/admin/restaurants/'+restaurantId+'/dishes/'+dishId+'/model/presign',{method:'POST',body,auth:A}),
+  adminDirectModelConfirm: (restaurantId,dishId,body) => request('/api/v1/admin/restaurants/'+restaurantId+'/dishes/'+dishId+'/model/confirm',{method:'POST',body,auth:A}),
   experienceSettings: () => request('/api/v1/studio/experience', {auth:R}),
   saveExperienceSettings: body => request('/api/v1/studio/experience', {method:'PUT',body,auth:R}),
   tables: (after=0) => request('/api/v1/studio/tables?after='+encodeURIComponent(after), {auth:R}),

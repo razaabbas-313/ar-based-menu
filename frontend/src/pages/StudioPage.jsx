@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, ChefHat, FolderPlus, FolderUp, LayoutList, LogIn, Menu, Palette, PlusCircle, ShieldAlert, TriangleAlert, X } from 'lucide-react';
 import Navbar from '../components/Navbar.jsx';
+import BrandStudio from '../components/studio/BrandStudio.jsx';
+import ModelsManager from '../components/studio/ModelsManager.jsx';
 import ExperienceManager from '../components/studio/ExperienceManager.jsx';
 import OwnerPlanOverview from '../components/studio/OwnerPlanOverview.jsx';
 import StudioTopBar from '../components/studio/StudioTopBar.jsx';
 import DishManager from '../components/studio/DishManager.jsx';
 import NewDishStudio from '../components/studio/NewDishStudio.jsx';
 import BatchUploadStudio from '../components/studio/BatchUploadStudio.jsx';
+import InsightDashboard from '../components/studio/InsightDashboard.jsx';
 import StudioAnalytics from '../components/studio/StudioAnalytics.jsx';
 import CategoryManagerModal from '../components/studio/CategoryManagerModal.jsx';
 import BrandCustomizer from '../components/studio/BrandCustomizer.jsx';
@@ -18,6 +21,7 @@ import { buzz, cx } from '../utils/format.js';
 import { navigate, useLocation } from '../utils/router.js';
 
 const TABS = [
+  {key:'models',label:'3D Models',short:'Models',icon:FolderPlus},
   { key: 'experience', label: 'Tables & WhatsApp', short: 'Guest setup', icon: Menu },
   { key: 'plan', label: 'Your plan', short: 'Plan', icon: ShieldAlert },
   { key: 'dishes', label: 'Dish Management', short: 'Dishes', icon: LayoutList },
@@ -276,20 +280,21 @@ function Studio() {
           {tab === 'brand' && !policy?.operational['branding.enabled'] && <p className="rounded-2xl border border-amber-400/20 p-6 text-sm text-zinc-400">Brand customization is unavailable under your current policy. View Your plan for details.</p>}
           {tab === 'brand' && policy?.operational['branding.enabled'] &&
             (settings ? (
-              <BrandCustomizer
+              <BrandStudio restaurant={restaurant}><BrandCustomizer
                 key={settings.branding.id}
                 settings={settings}
                 onSettings={setSettings}
                 onOpenCategoryManager={() => setCategoryModalOpen(true)}
-              />
+              /></BrandStudio>
             ) : (
               <div className="grid place-items-center py-24">
                 <Spinner />
               </div>
             ))}
+          {tab === 'models' && <ModelsManager dishes={dishes} policy={policy} onSaved={()=>{loadDishes();loadSettings();}}/>}
           {tab === 'experience' && <ExperienceManager restaurant={restaurant} />}
           {tab === 'plan' && <OwnerPlanOverview />}
-          {tab === 'analytics' && <StudioAnalytics />}
+          {tab === 'analytics' && <><InsightDashboard/><details className="mt-8 rounded-2xl border hairline p-5"><summary className="cursor-pointer text-sm">Historical legacy counters · separate definitions</summary><div className="mt-5"><StudioAnalytics/></div></details></>}
         </main>
       </div>
 

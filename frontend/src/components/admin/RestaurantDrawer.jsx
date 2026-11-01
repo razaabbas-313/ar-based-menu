@@ -26,6 +26,7 @@ import { CATEGORY_LABEL, STATUS_STYLE, cx, fmtBytes, fmtDate, fmtPrice } from '.
 import { impersonateRestaurant } from './impersonate.js';
 import RestaurantQrModal from '../RestaurantQrModal.jsx';
 import TemporaryPasswordModal from './TemporaryPasswordModal.jsx';
+import ModelsManager from '../studio/ModelsManager.jsx';
 import RestaurantEntitlements from './RestaurantEntitlements.jsx';
 import LuxurySelect from '../ui/LuxurySelect.jsx';
 
@@ -308,6 +309,7 @@ export default function RestaurantDrawer({ restaurantId, version = 0, onClose, o
               </section>
 
               <section>
+                <ModelsManager adminRestaurantId={restaurantId} dishes={detail.dishes} policy={effectivePolicy} onSaved={()=>{load();onChanged?.();}}/>
                 <H>Dishes ({detail.dishes.length})</H>
                 {detail.dishes.length === 0 ? (
                   <p className="rounded-2xl border border-dashed hairline px-4 py-6 text-center text-sm text-zinc-500">No dishes yet.</p>

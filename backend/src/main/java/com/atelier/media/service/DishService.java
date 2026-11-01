@@ -37,6 +37,7 @@ import java.util.Set;
 @Slf4j
 @Service
 public class DishService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private ModelHistoryService modelHistory;
     private EntitlementService entitlements;
     @org.springframework.beans.factory.annotation.Autowired
     public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
@@ -193,6 +194,7 @@ public class DishService {
             if (d.isLegacyModelOnly()) {
                 throw new ConflictException("model", LEGACY_3D_ONLY);
             }
+            if(modelHistory!=null)modelHistory.issued(d,key,tenant.impersonated()?"SUPPORT_UNKNOWN":"RESTAURANT",tenant.impersonated()?null:tenant.restaurantId());
             previousPending[0] = d.getPendingModelS3Key();
             d.setPendingModelS3Key(key);
             d.setPendingModelSizeBytes(request.uploadSizeBytes());
@@ -217,6 +219,7 @@ public class DishService {
                     "Direct 3D model uploads are not enabled for this restaurant.");
         }
         Media dish = mediaRepository.findByIdAndRestaurantId(id, tenant.restaurantId()).orElseThrow(() -> notFound(id));
+        if(modelHistory!=null)modelHistory.requireIssuer(confirm.s3Key(),tenant.impersonated()?"SUPPORT_UNKNOWN":"RESTAURANT",tenant.impersonated()?null:tenant.restaurantId());
         if (confirm.s3Key().equals(dish.getModelS3Key())) {
             return DishMapper.toDto(dish); // already confirmed (idempotent retry)
         }
@@ -244,6 +247,7 @@ public class DishService {
             boolean hadModel = d.hasModel();
             long oldSize = d.getModelFileSizeBytes() == null ? 0 : d.getModelFileSizeBytes();
             replacedKey[0] = d.getModelS3Key();
+            if(modelHistory!=null)modelHistory.published(d,confirm.s3Key(),storage.publicUrl(confirm.s3Key()),actualSize,"RESTAURANT_UPLOAD",tenant.impersonated()?"SUPPORT_UNKNOWN":"RESTAURANT",tenant.impersonated()?null:tenant.restaurantId(),null);
             d.setModelS3Key(confirm.s3Key());
             d.setModelS3Url(storage.publicUrl(confirm.s3Key()));
             d.setModelFileSizeBytes(actualSize);
@@ -267,6 +271,8 @@ public class DishService {
         Restaurant restaurant = restaurantAccess.requireStudioAccess(tenant);
         String[] removedKey = new String[1];
         Media saved = tx.execute(status -> {
+            restaurantRepository.findByIdForUpdate(tenant.restaurantId()).orElseThrow();
+            restaurantAccess.requireStudioAccess(tenant);
             Media d = requireCompletedDish(tenant, id);
             if (d.isLegacyModelOnly()) {
                 throw new ConflictException("model", LEGACY_3D_ONLY);
@@ -276,6 +282,7 @@ public class DishService {
             }
             long size = d.getModelFileSizeBytes() == null ? 0 : d.getModelFileSizeBytes();
             removedKey[0] = d.getModelS3Key();
+            if(modelHistory!=null)modelHistory.detached(d);
             d.setModelS3Key(null);
             d.setModelS3Url(null);
             d.setModelFileSizeBytes(0L);

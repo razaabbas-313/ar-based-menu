@@ -32,6 +32,7 @@ public class AssetCleanupListener {
     @PreRemove
     public void removed(Object entity) {
         if(entity instanceof Media m) {
+            db.update("update model_versions set state='SUPERSEDED' where dish_id=? and restaurant_id=? and state='CURRENT'",m.getId(),m.getRestaurantId());
             Set<String> known=keys(m);add(known,m.getS3Key());
             release(m.getRestaurantId(),m.getS3Bucket(),known,Set.of(),"DISH_REMOVED");
             captureRelated(m.getRestaurantId(),m.getId());
@@ -42,6 +43,7 @@ public class AssetCleanupListener {
                 for(int i=2;i<=5;i++) cleanup.record(r.getId(),rs.getString(1),rs.getString(i),"TENANT_REMOVED");
                 for(String key:photos(rs.getString(6))) cleanup.record(r.getId(),rs.getString(1),key,"TENANT_REMOVED");
             },r.getId());
+            db.query("select object_key from brand_studio_assets where restaurant_id=?",rs->{cleanup.record(r.getId(),bucket,rs.getString(1),"TENANT_BRAND_REMOVED");},r.getId());
             captureRelated(r.getId(),null);
         }
     }

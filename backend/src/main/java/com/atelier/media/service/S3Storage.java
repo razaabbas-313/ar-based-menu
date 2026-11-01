@@ -90,6 +90,15 @@ public class S3Storage {
         return tenantPrefix(slug) + segment + "/" + (namePrefix == null ? "" : namePrefix) + UUID.randomUUID() + "." + ext;
     }
 
+    /** Seal a private upload to a fresh key that has never received a browser PUT capability. */
+    public void sealPrivateCopy(String source,String destination,String expectedEtag,String contentType){
+        requireConfigured();
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())throw new IllegalStateException("Copy must run outside the database transaction");
+        if(source==null||destination==null||!isPrivateKey(source)||!isPrivateKey(destination)||source.equals(destination)||source.contains("..")||destination.contains("..")||expectedEtag==null||expectedEtag.isBlank()||expectedEtag.length()>256||expectedEtag.contains("\r")||expectedEtag.contains("\n"))throw new UploadVerificationException("Invalid private sealing request.");
+        String encoded=java.net.URLEncoder.encode(bucket()+"/"+source,java.nio.charset.StandardCharsets.UTF_8).replace("+","%20").replace("%2F","/");
+        client.copyObject(software.amazon.awssdk.services.s3.model.CopyObjectRequest.builder().bucket(bucket()).key(destination).copySource(encoded).copySourceIfMatch(expectedEtag)
+            .metadataDirective(software.amazon.awssdk.services.s3.model.MetadataDirective.REPLACE).metadata(Map.of()).contentType(contentType).cacheControl(PRIVATE_CACHE_CONTROL).overrideConfiguration(c->c.apiCallTimeout(Duration.ofMinutes(2)).apiCallAttemptTimeout(Duration.ofSeconds(30))).build());
+    }
     public String publicUrl(String key) {
         String base = aws.s3().publicBaseUrl();
         if (base != null && !base.isBlank()) {

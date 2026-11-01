@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api/client.js';
+import ReviewSettings from './ReviewSettings.jsx';
 import RestaurantQrModal from '../RestaurantQrModal.jsx';
 import { tableMenuUrl } from '../../utils/guestOrders.js';
 const input='mt-2 min-h-12 w-full rounded-xl border border-white/15 bg-black/30 px-4 py-3 text-zinc-100 focus:border-amber-300';
@@ -33,6 +34,7 @@ export default function ExperienceManager({restaurant}){
    {!tables.length?<p className="rounded-xl border border-dashed hairline p-8 text-center text-zinc-400">No tables yet. Create your first table to preview and export its QR card.</p>:<ul className="divide-y divide-white/10">{tables.map(t=><li key={t.id} className="flex flex-wrap items-center justify-between gap-3 py-4"><div><span className="font-semibold">{t.name}</span><span className="ml-3 text-xs text-zinc-500">{t.active?'Active':'Disabled'}</span></div><div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={()=>setEdit({...t})}>Rename</button><button className={button} disabled={busy||(!t.active&&!flags['qr.table'])} onClick={()=>action(()=>api.updateTable(t.id,{...t,active:!t.active,expectedVersion:t.version}),t.active?'Table disabled.':'Table activated.')}>{t.active?'Disable':'Activate'}</button>{t.qrToken&&<><button className={button} onClick={()=>setQr(t)}>Preview / export QR</button><button className={button} disabled={busy} onClick={()=>{if(window.confirm(`Rotate ${t.name}? Old printed cards will stop working.`))action(()=>api.rotateTable(t.id,t.version),'QR identity rotated. Replace old printed cards.');}}>Rotate link</button></>}</div></li>)}</ul>}
    {more&&<button className={button} disabled={busy} onClick={async()=>{setBusy(true);try{const next=await api.tables(tables.at(-1).id);setTables(rows=>[...rows,...next]);setMore(next.length===200);}catch(e){setError(e.message);}finally{setBusy(false);}}}>Load more tables</button>}
   </section>
+  <ReviewSettings/>
   {edit&&<form className="rounded-2xl border border-amber-300/30 p-5" onSubmit={e=>{e.preventDefault();action(async()=>{await api.updateTable(edit.id,{...edit,expectedVersion:edit.version});setEdit(null);},'Table renamed.');}}><label className="text-sm">Rename table<input className={input} autoFocus required maxLength={60} value={edit.name} onChange={e=>setEdit(t=>({...t,name:e.target.value}))}/></label><div className="mt-3 flex gap-2"><button className={button} disabled={busy}>Save name</button><button type="button" className={button} onClick={()=>setEdit(null)}>Cancel</button></div></form>}
   {qr&&(qr.venue?flags['qr.venue']:flags['qr.table'])&&<RestaurantQrModal restaurant={restaurant} tableLabel={qr.venue?undefined:qr.name} urlOverride={qr.venue?undefined:tableMenuUrl(restaurant.slug,qr.qrToken)} onClose={()=>setQr(null)}/>}
  </div>;
