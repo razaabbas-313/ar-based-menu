@@ -6,6 +6,7 @@ import { isChefSpecial } from './GuestDishCard.jsx';
 import { CATEGORY_LABEL, buzz, cx, fmtPrice } from '../../utils/format.js';
 import { preloadModelViewer } from '../../utils/modelViewer.js';
 import { api } from '../../api/client.js';
+import { appearanceStyle } from '../../utils/appearance.js';
 
 /**
  * Dish inspector. Opens on the cover photo, title, description and price, and IMMEDIATELY starts
@@ -13,7 +14,7 @@ import { api } from '../../api/client.js';
  * invisible underneath the photo. "View in 3D" only reveals the already-parsed model, so the 3D
  * view appears instantly, without a download spinner.
  */
-export default function DishSheet({ item, slug, currency, currencySymbol, onClose, onArFallback, arAllowed = true, onAddToCart }) {
+export default function DishSheet({ item, slug, currency, currencySymbol, onClose, onArFallback, arAllowed = true, onAddToCart, onObservation, reducedMotion=false, appearance }) {
   const [view, setView] = useState('photo'); // photo | 3d
   const [lighting, setLighting] = useState('studio');
   const [progress, setProgress] = useState(0);
@@ -22,6 +23,8 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
   const [hint, setHint] = useState(true);
   const viewer = useRef(null);
   const arIntentRef = useRef(false);
+  const readyObserved=useRef(false);
+  useEffect(()=>{if(view==='photo')readyObserved.current=false;if(view==='3d'&&viewerReady&&!readyObserved.current){readyObserved.current=true;onObservation?.('MODEL_VIEW_READY',item.id);}},[view,viewerReady,item.id]);
   const has3d = !!(item.is3d && item.modelUrl);
 
   useEffect(() => {
@@ -79,6 +82,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
 
   const requestAr = () => {
     if(!arAllowed)return;
+    onObservation?.('AR_ATTEMPT',item.id);
     buzz(14);
     setView('3d');
     if (slug) {
@@ -99,7 +103,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
   return (
     <Overlay onClose={onClose} align="bottom" label={item.dishTitle}>
       <div
-        className="sheet pb-safe relative z-10 flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0e0e10] sm:rounded-[30px]"
+        style={appearance?appearanceStyle(appearance):undefined} data-theme={appearance?.preset} data-motion={appearance?.motion} className="atelier-menu sheet pb-safe relative z-10 flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[30px] border border-white/10 bg-[#0e0e10] sm:rounded-[30px]"
         data-testid="dish-inspector"
       >
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-zinc-700 sm:hidden" />
@@ -124,7 +128,7 @@ export default function DishSheet({ item, slug, currency, currencySymbol, onClos
                   arEnabled={arAllowed}
                   variant="full"
                   lighting={lighting}
-                  autoRotate={view === '3d'}
+                  autoRotate={view === '3d'&&!reducedMotion}
                   viewerRef={viewer}
                   onReady={onReady}
                   onProgress={onProgress}

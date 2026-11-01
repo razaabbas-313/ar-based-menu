@@ -109,7 +109,9 @@ public class EntitlementService {
         return readSnapshot.execute(status->List.copyOf((List<?>)values(tenant).get("menu.allowedModes")));
     }
     public Map<String,Object> effective(long tenant,boolean adminView) {
-        if(!TransactionSynchronizationManager.isActualTransactionActive() || TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+        Integer isolation=TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        boolean coherent=Objects.equals(isolation,org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ)||Objects.equals(isolation,org.springframework.transaction.TransactionDefinition.ISOLATION_SERIALIZABLE);
+        if(!TransactionSynchronizationManager.isActualTransactionActive() || (TransactionSynchronizationManager.isCurrentTransactionReadOnly()&&!coherent))
             return readSnapshot.execute(status->effectiveSnapshot(tenant,adminView));
         return effectiveSnapshot(tenant,adminView);
     }
@@ -160,6 +162,7 @@ public class EntitlementService {
     private Map<String,Object> usage(long tenant) {
         Map<String,Object> u=new LinkedHashMap<>();u.put("dishes",count("select count(*) from media_details where restaurant_id=? and upload_status<>'FAILED'",tenant));
         u.put("models",count("select count(*) from media_details where restaurant_id=? and (model_s3_key is not null or content_type like 'model/%' or pending_model_s3_key is not null or model_request_status in ('PENDING','IN_PRODUCTION'))",tenant));
+        u.put("retainedModelVersions",count("select count(*) from model_versions where restaurant_id=? and state='SUPERSEDED' and retention='HELD'",tenant));u.put("retainedModelBytes",count("select coalesce(sum(size_bytes),0) from model_versions where restaurant_id=? and state='SUPERSEDED' and retention='HELD'",tenant));
         u.put("conciergePerPeriod",monthly(tenant));u.put("period","UTC_CALENDAR_MONTH");u.put("tables",count("select count(*) from restaurant_tables where restaurant_id=? and active=true",tenant));return u;
     }
     public void requireDishCapacity(long tenant,boolean confirming) {

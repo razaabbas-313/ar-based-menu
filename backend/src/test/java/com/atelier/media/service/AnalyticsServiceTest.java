@@ -49,8 +49,9 @@ class AnalyticsServiceTest {
 
         restaurant = TestFixtures.restaurant(10L, "bistro-paris");
         when(restaurantRepository.findBySlug("bistro-paris")).thenReturn(Optional.of(restaurant));
+        when(restaurantRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(restaurant));
 
-        ownedDish = Media.builder().id(101L).restaurantId(10L).dishTitle("Croissant").build();
+        ownedDish = Media.builder().id(101L).restaurantId(10L).dishTitle("Croissant").uploadStatus(com.atelier.media.model.UploadStatus.COMPLETED).available(true).build();
         foreignDish = Media.builder().id(202L).restaurantId(99L).dishTitle("Pasta").build();
 
         when(mediaRepository.findById(101L)).thenReturn(Optional.of(ownedDish));
@@ -99,7 +100,7 @@ class AnalyticsServiceTest {
         // 60 requests should pass (different dishes to avoid deduplication)
         for (int i = 0; i < 60; i++) {
             long dishId = 1000L + i;
-            Media mockDish = Media.builder().id(dishId).restaurantId(10L).build();
+            Media mockDish = Media.builder().id(dishId).restaurantId(10L).uploadStatus(com.atelier.media.model.UploadStatus.COMPLETED).available(true).build();
             when(mediaRepository.findById(dishId)).thenReturn(Optional.of(mockDish));
 
             AnalyticsEventDto dto = new AnalyticsEventDto("bistro-paris", dishId, "MENU_VIEW");

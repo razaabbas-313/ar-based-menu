@@ -47,7 +47,7 @@ public class AnalyticsService {
     private final AnalyticsEventRepository eventRepository;
     private final AnalyticsDailyRepository dailyRepository;
     private final TransactionTemplate tx;
-    private final Executor asyncExecutor;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private org.springframework.jdbc.core.JdbcTemplate db;
 
     private final Cache<String, AtomicInteger> ipRateLimit;
     private final Cache<String, Boolean> recentViews;
@@ -58,7 +58,7 @@ public class AnalyticsService {
                             AnalyticsEventRepository eventRepository,
                             AnalyticsDailyRepository dailyRepository,
                             TransactionTemplate tx) {
-        this(restaurantRepository, mediaRepository, eventRepository, dailyRepository, tx, Executors.newVirtualThreadPerTaskExecutor());
+        this(restaurantRepository, mediaRepository, eventRepository, dailyRepository, tx, Runnable::run);
     }
 
     public AnalyticsService(RestaurantRepository restaurantRepository,
@@ -72,7 +72,7 @@ public class AnalyticsService {
         this.eventRepository = eventRepository;
         this.dailyRepository = dailyRepository;
         this.tx = tx;
-        this.asyncExecutor = asyncExecutor;
+        // Executor argument retained for source compatibility; ingestion now commits synchronously.
 
         this.ipRateLimit = Caffeine.newBuilder()
                 .expireAfterWrite(Duration.ofMinutes(1))
@@ -106,14 +106,14 @@ public class AnalyticsService {
         if (!"unknown".equalsIgnoreCase(safeIp)) {
             AtomicInteger count = ipRateLimit.get(safeIp, k -> new AtomicInteger());
             if (count.incrementAndGet() > 60) {
-                log.warn("Analytics rate limit exceeded for IP: {}", safeIp);
+                log.warn("Analytics rate limit exceeded");
                 throw new TooManyAttemptsException(Duration.ofMinutes(1));
             }
         }
 
         // 3. Resolve restaurant -> 404 if not found
         Restaurant restaurant = restaurantRepository.findBySlug(dto.slug().strip())
-                .filter(r -> !r.isDeleted())
+                .filter(r -> r.isPubliclyVisible() && !Boolean.FALSE.equals(r.getIsMenuLive()))
                 .orElseThrow(() -> new RestaurantNotFoundException(dto.slug()));
 
         // 4. Verify dish ownership if dishId provided -> 400 if foreign or missing
@@ -127,61 +127,29 @@ public class AnalyticsService {
 
         // 5. De-duplicate rapid duplicate views within 30 seconds -> ignore duplicate silently
         String dedupKey = safeIp + "|" + (dto.dishId() == null ? 0 : dto.dishId()) + "|" + eventType.name() + "|" + restaurant.getId();
-        if (recentViews.getIfPresent(dedupKey) != null) {
-            log.debug("Analytics event deduplicated: {}", dedupKey);
-            return;
-        }
-        recentViews.put(dedupKey, Boolean.TRUE);
-
-        // 6. Asynchronous DB write off the request thread
-        Long restaurantId = restaurant.getId();
-        Long dishId = dto.dishId();
-        CompletableFuture.runAsync(() -> persistEvent(restaurantId, dishId, eventType), asyncExecutor);
-    }
-
-    private void persistEvent(Long restaurantId, Long dishId, AnalyticsEventType type) {
+        String key=hashKey(dedupKey);
         tx.executeWithoutResult(status -> {
-            try {
-                // Increment counters
-                switch (type) {
-                    case MENU_VIEW -> {
-                        restaurantRepository.incrementMenuViews(restaurantId);
-                        if (dishId != null) mediaRepository.incrementViews(dishId);
-                    }
-                    case MODEL_3D_VIEW -> {
-                        restaurantRepository.incrementModelViews(restaurantId);
-                        if (dishId != null) mediaRepository.incrementModelViews(dishId);
-                    }
-                    case AR_LAUNCH -> {
-                        restaurantRepository.incrementArLaunches(restaurantId);
-                        if (dishId != null) mediaRepository.incrementArLaunches(dishId);
-                    }
-                }
-
-                // Save event
-                AnalyticsEvent event = AnalyticsEvent.builder()
-                        .restaurantId(restaurantId)
-                .dishId(dishId)
-                .eventType(type.name())
-                .build();
-                eventRepository.save(event);
-
-                // Update daily aggregate table
-                LocalDate today = LocalDate.now(ZoneOffset.UTC);
-                Long safeDishId = dishId != null ? dishId : 0L;
-                AnalyticsDailyId dailyId = new AnalyticsDailyId(restaurantId, safeDishId, type.name(), today);
-                Optional<AnalyticsDaily> existingDaily = dailyRepository.findById(dailyId);
-                if (existingDaily.isPresent()) {
-                    AnalyticsDaily daily = existingDaily.get();
-                    daily.setEventCount(daily.getEventCount() + 1);
-                    dailyRepository.save(daily);
-                } else {
-                    dailyRepository.save(new AnalyticsDaily(restaurantId, safeDishId, type.name(), today, 1L));
-                }
-            } catch (Exception e) {
-                log.error("Failed to persist analytics event for restaurant {}: {}", restaurantId, e.getMessage(), e);
-            }
+            Restaurant current=restaurantRepository.findByIdForUpdate(restaurant.getId()).orElseThrow(()->new RestaurantNotFoundException(dto.slug()));
+            if(!current.isPubliclyVisible()||Boolean.FALSE.equals(current.getIsMenuLive()))throw new RestaurantNotFoundException(dto.slug());
+            if(dto.dishId()!=null){Media dish=mediaRepository.findById(dto.dishId()).orElseThrow(()->new InvalidFieldException("dishId","Dish unavailable"));
+                if(!dish.getRestaurantId().equals(current.getId())||dish.getUploadStatus()!=UploadStatus.COMPLETED||!Boolean.TRUE.equals(dish.getAvailable()))throw new InvalidFieldException("dishId","Dish unavailable");}
+            if(db!=null){Long duplicate=db.queryForObject("select count(*) from analytics_legacy_dedup where dedup_key=? and expires_at>CURRENT_TIMESTAMP",Long.class,key);if(duplicate>0)return;}
+            else if(recentViews.getIfPresent(key)!=null)return;
+            persistEvent(current.getId(),dto.dishId(),eventType);
+            if(db!=null){db.update("delete from analytics_legacy_dedup where dedup_key=?",key);db.update("insert into analytics_legacy_dedup(dedup_key,expires_at) values(?,?)",key,java.sql.Timestamp.from(Instant.now().plusSeconds(30)));}
         });
+        if(db==null)recentViews.put(key,Boolean.TRUE);
+    }
+    private static String hashKey(String value){try{return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
+    private void persistEvent(Long restaurantId,Long dishId,AnalyticsEventType type){
+        switch(type){
+            case MENU_VIEW -> {restaurantRepository.incrementMenuViews(restaurantId);if(dishId!=null)mediaRepository.incrementViews(dishId);}
+            case MODEL_3D_VIEW -> {restaurantRepository.incrementModelViews(restaurantId);if(dishId!=null)mediaRepository.incrementModelViews(dishId);}
+            case AR_LAUNCH -> {restaurantRepository.incrementArLaunches(restaurantId);if(dishId!=null)mediaRepository.incrementArLaunches(dishId);}
+        }
+        eventRepository.save(AnalyticsEvent.builder().restaurantId(restaurantId).dishId(dishId).eventType(type.name()).build());
+        LocalDate today=LocalDate.now(ZoneOffset.UTC);Long safeDish=dishId==null?0L:dishId;
+        var id=new AnalyticsDailyId(restaurantId,safeDish,type.name(),today);var daily=dailyRepository.findById(id).orElse(new AnalyticsDaily(restaurantId,safeDish,type.name(),today,0L));daily.setEventCount(daily.getEventCount()+1);dailyRepository.save(daily);
     }
 
     /** Restaurant owner analytics dashboard. */

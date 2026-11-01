@@ -16,6 +16,8 @@ import java.util.*;
 /** Guest context is not authentication or proof of presence. Prepared summaries are not orders accepted. */
 @Service
 public class GuestExperienceService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false) @org.springframework.context.annotation.Lazy private GuestInsightService insights;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) @org.springframework.context.annotation.Lazy private ProductStudioService productStudio;
     public record SettingsWrite(long expectedVersion,String menuMode,boolean orderingEnabled,boolean waiterEnabled,String orderNumber,String waiterNumber,String waiterMessage) {}
     public record TableWrite(String name,boolean active,long expectedVersion) {}
     public record OrderLine(Long dishId,@com.fasterxml.jackson.databind.annotation.JsonDeserialize(using=QuantityDeserializer.class) Integer quantity,BigDecimal expectedUnitPrice,String note) {}
@@ -127,7 +129,7 @@ public class GuestExperienceService {
                 BigDecimal amount=price.multiply(BigDecimal.valueOf(line.quantity()));total=total.add(amount);
                 Map<String,Object> verified=new LinkedHashMap<>();verified.put("dishId",dish.getId());verified.put("name",dish.getDishTitle());verified.put("quantity",line.quantity());verified.put("unitPrice",price.toPlainString());verified.put("lineTotal",amount.toPlainString());verified.put("note",note);lines.add(Collections.unmodifiableMap(verified));
             }
-            Map<String,Object> snapshot=new LinkedHashMap<>();Instant now=Instant.now();snapshot.put("reference",UUID.randomUUID().toString());snapshot.put("status","PREPARED_REQUEST");snapshot.put("restaurantName",r.getName());snapshot.put("currency",r.getCurrencyCode());snapshot.put("currencySymbol",r.getCurrencySymbol());snapshot.put("themeAccent",r.getThemeAccent());snapshot.put("tableLabel",label);snapshot.put("lines",List.copyOf(lines));snapshot.put("estimatedTotal",total.setScale(2).toPlainString());snapshot.put("notes",notes);snapshot.put("recipient",recipient);snapshot.put("preparedAt",now);snapshot.put("expiresAt",now.plus(Duration.ofMinutes(10)));snapshot.put("disclaimer","Order Request — Not Yet Accepted");return Collections.unmodifiableMap(snapshot);
+            Map<String,Object> snapshot=new LinkedHashMap<>();Instant now=Instant.now();snapshot.put("reference",UUID.randomUUID().toString());snapshot.put("status","PREPARED_REQUEST");snapshot.put("restaurantName",r.getName());snapshot.put("currency",r.getCurrencyCode());snapshot.put("currencySymbol",r.getCurrencySymbol());snapshot.put("themeAccent",productStudio==null?r.getThemeAccent():((Map<?,?>)productStudio.publicAppearance(r.getSlug()).get("appearance")).get("accent"));snapshot.put("tableLabel",label);snapshot.put("lines",List.copyOf(lines));snapshot.put("estimatedTotal",total.setScale(2).toPlainString());snapshot.put("notes",notes);snapshot.put("recipient",recipient);snapshot.put("preparedAt",now);snapshot.put("expiresAt",now.plus(Duration.ofMinutes(10)));snapshot.put("disclaimer","Order Request — Not Yet Accepted");if(insights!=null)insights.prepared(r.getId(),(String)snapshot.get("reference"),"ORDER_PREPARED",selectedMode(r.getId(),entitlements.allowedModes(r.getId())),label!=null);return Collections.unmodifiableMap(snapshot);
         });
     }
     public Map<String,Object> waiter(String slug,WaiterWrite dto,String ip) {
@@ -135,7 +137,7 @@ public class GuestExperienceService {
         return tx.execute(s->{Restaurant r=publicLocked(found.getId());requireLive(r);entitlements.requireFeature(r.getId(),"waiter.enabled");var config=read(r);
             if(!Boolean.TRUE.equals(config.get("waiterEnabled")))deny("Waiter requests are disabled by this restaurant.");String recipient=recipient(config,true);if(recipient==null)deny("No usable waiter WhatsApp number is configured.");
             String label=resolveTable(r.getId(),dto.tableToken());String message=config.get("waiterMessage")+"\nRestaurant: "+r.getName()+"\n"+(label==null?"General assistance requested.":"Table: "+label)+"\nPlease send this message in WhatsApp.";
-            Map<String,Object> result=new LinkedHashMap<>();result.put("recipient",recipient);result.put("tableLabel",label);result.put("message",message);result.put("url","https://wa.me/"+recipient+"?text="+java.net.URLEncoder.encode(message,StandardCharsets.UTF_8));result.put("status","CHAT_READY_NOT_SENT");return result;});
+            Map<String,Object> result=new LinkedHashMap<>();result.put("recipient",recipient);result.put("tableLabel",label);result.put("message",message);result.put("url","https://wa.me/"+recipient+"?text="+java.net.URLEncoder.encode(message,StandardCharsets.UTF_8));result.put("status","CHAT_READY_NOT_SENT");if(insights!=null)insights.prepared(r.getId(),UUID.randomUUID().toString(),"WAITER_PREPARED",selectedMode(r.getId(),entitlements.allowedModes(r.getId())),label!=null);return result;});
     }
     public void checkRate(String operation,String ip,int max) {
         String key=operation+":"+hash(ip==null?"unknown":ip);int count=attempts.get(key,k->new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();

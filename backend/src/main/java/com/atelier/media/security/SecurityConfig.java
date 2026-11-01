@@ -110,8 +110,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/admin/login",
                                 "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password-otp").permitAll()
                         // Guest menus and analytics events
-                        .requestMatchers(HttpMethod.GET, "/api/v1/public/menu/*", "/api/v1/restaurants/*/menu").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/public/analytics/event", "/api/v1/public/context/*", "/api/v1/public/order-preparations/*", "/api/v1/public/waiter-requests/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/brand-assets/*", "/api/v1/public/appearance/*", "/api/v1/public/menu/*", "/api/v1/restaurants/*/menu").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/analytics/event", "/api/v1/public/insights/event", "/api/v1/public/context/*", "/api/v1/public/order-preparations/*", "/api/v1/public/waiter-requests/*").permitAll()
                         .requestMatchers("/health", "/actuator/health/**", "/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/error").permitAll()
                         // Tier 1: platform owner

@@ -54,6 +54,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class ModelRequestService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private ModelHistoryService modelHistory;
     private EntitlementService entitlements;
     @org.springframework.beans.factory.annotation.Autowired
     public void setEntitlements(EntitlementService entitlements) { this.entitlements=entitlements; }
@@ -295,6 +296,7 @@ public class ModelRequestService {
             if(lockedRestaurant.isDeleted()||!lockedRestaurant.getStatus().canUseStudio())throw new ConflictException("status","Restaurant unavailable.");
             if(entitlements!=null)entitlements.requireModelCapacity(restaurant.getId(),dishId,request.uploadSizeBytes(),false);
             Media current=mediaRepository.findByIdAndRestaurantIdForUpdate(dishId,restaurant.getId()).orElseThrow();
+            if(modelHistory!=null&&actor!=null)modelHistory.issued(current,s3Key,"ADMIN",actor.adminId());
             current.setPendingModelS3Key(s3Key); current.setPendingModelSizeBytes(request.uploadSizeBytes());
             current.setPendingModelContentType(ct); current.setPendingModelCreatedAt(Instant.now());
             mediaRepository.save(current);
@@ -309,6 +311,7 @@ public class ModelRequestService {
         requireDetached(); storage.requireConfigured(); adminAccess.requireAccount(admin);
         Media snapshot=mediaRepository.findById(dishId).orElseThrow(()->new MediaNotFoundException(dishId));
         Restaurant before=restaurantRepository.findById(snapshot.getRestaurantId()).orElseThrow();
+        if(modelHistory!=null)modelHistory.requireIssuer(dto.s3Key(),"ADMIN",admin.adminId());
         if(dto.s3Key()==null || !dto.s3Key().startsWith(storage.tenantPrefix(before.getSlug())+"models/") ||
             !dto.s3Key().equals(snapshot.getPendingModelS3Key()) || cleanup.isRetired(dto.s3Key())) throw new InvalidMediaException("Model upload is no longer issued for this dish.");
         HeadObjectResponse head=storage.head(storage.bucket(),dto.s3Key());
@@ -326,6 +329,8 @@ public class ModelRequestService {
                 !java.util.Objects.equals(snapshot.getModelRequestStatus(),dish.getModelRequestStatus()) || cleanup.isRetired(dto.s3Key()))
                 throw new ConflictException("dishId","Model publication state changed; refresh before retrying.");
             if(dish.getPendingModelSizeBytes()!=null && dish.getPendingModelSizeBytes()!=modelSize) throw new InvalidMediaException("Model upload size changed.");
+            Optional<ModelRequest> activeReq=activeRequest(dishId);
+            if(modelHistory!=null)modelHistory.published(dish,dto.s3Key(),storage.publicUrl(dto.s3Key()),modelSize,activeReq.isPresent()?"CONCIERGE":"ADMIN_DIRECT","ADMIN",admin.adminId(),activeReq.map(ModelRequest::getId).orElse(null));
             String oldModelKey = dish.getModelS3Key();
             boolean isReplacement = oldModelKey != null && !oldModelKey.equals(dto.s3Key());
 
@@ -345,10 +350,6 @@ public class ModelRequestService {
             dish.setModelCompletedAt(Instant.now());
             Media saved = mediaRepository.save(dish);
 
-            Optional<ModelRequest> activeReq = modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId, ModelRequest.STATUS_PENDING);
-            if (activeReq.isEmpty()) {
-                activeReq = modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId, ModelRequest.STATUS_IN_PRODUCTION);
-            }
             Long currentReqId;
             if (activeReq.isPresent()) {
                 ModelRequest req = activeReq.get();
@@ -358,17 +359,7 @@ public class ModelRequestService {
                 req.setCompletedAt(Instant.now());
                 currentReqId=modelRequestRepository.save(req).getId();
             } else {
-                ModelRequest directReq = ModelRequest.builder()
-                        .restaurantId(restaurant.getId())
-                        .dishId(dishId)
-                        .status(ModelRequest.STATUS_COMPLETED)
-                        .requestType(isReplacement ? ModelRequest.TYPE_REPLACEMENT : ModelRequest.TYPE_NEW)
-                        .completedModelKey(dto.s3Key())
-                        .completedModelUrl(storage.publicUrl(dto.s3Key()))
-                        .requestedAt(Instant.now())
-                        .completedAt(Instant.now())
-                        .build();
-                currentReqId=modelRequestRepository.save(directReq).getId();
+                currentReqId=null; // Direct publication has model provenance, not a fabricated concierge request.
             }
 
             List<ModelRequest> allReqs = modelRequestRepository.findByDishIdOrderByRequestedAtDesc(dishId);
@@ -395,6 +386,7 @@ public class ModelRequestService {
         });
     }
 
+    private Optional<ModelRequest> activeRequest(Long dishId){var pending=modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId,ModelRequest.STATUS_PENDING);return pending.isPresent()?pending:modelRequestRepository.findFirstByDishIdAndStatusOrderByRequestedAtDesc(dishId,ModelRequest.STATUS_IN_PRODUCTION);}
     /** Returns full 3D model request and completion history for a restaurant. */
     @Transactional(readOnly = true)
     public List<ModelRequestHistoryDto> getHistoryForRestaurant(Long restaurantId) {

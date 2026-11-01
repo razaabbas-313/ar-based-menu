@@ -43,6 +43,8 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 class ModelRequestTransactionSafetyTest {
     @Autowired ModelRequestService service;
+    @Autowired ModelHistoryService modelHistory;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate db;
     @Autowired RestaurantRepository restaurants;
     @Autowired MediaRepository media;
     @Autowired ModelRequestRepository requests;
@@ -184,7 +186,8 @@ class ModelRequestTransactionSafetyTest {
             return modelHead();
         });
         assertThat(runConcurrently(this::approve)).containsExactlyInAnyOrder(true, false);
-        assertThat(requests.findByDishIdOrderByRequestedAtDesc(dish.getId())).hasSize(1);
+        assertThat(requests.findByDishIdOrderByRequestedAtDesc(dish.getId())).isEmpty();
+        assertThat(modelHistory.list(restaurant.getId(),dish.getId(),0)).hasSize(1).allSatisfy(v->assertThat(v).containsEntry("origin","ADMIN_DIRECT").containsEntry("state","CURRENT").containsEntry("retention","HELD"));
         Media published = media.findById(dish.getId()).orElseThrow();
         assertThat(published.getModelS3Key()).isEqualTo(modelKey);
         assertThat(published.getPendingModelS3Key()).isNull();
@@ -238,17 +241,18 @@ class ModelRequestTransactionSafetyTest {
     }
 
     @Test
-    void successiveDirectApprovalsSupersedeHistoryWithoutDoubleAccounting() {
+    void successiveDirectApprovalsSupersedeVersionsWithoutFakeRequestsOrDoubleAccounting() {
         when(storage.head(anyString(),anyString())).thenReturn(modelHead());
         String firstKey=modelKey;
         approve();
         modelKey=modelKey+"-v2.glb";
         independently(()->{Media current=media.findById(dish.getId()).orElseThrow();current.setPendingModelS3Key(modelKey);current.setPendingModelSizeBytes(500L);media.saveAndFlush(current);});
         approve();
-        var history=requests.findByDishIdOrderByRequestedAtDesc(dish.getId());
-        assertThat(history).hasSize(2);
-        assertThat(history.stream().filter(r->firstKey.equals(r.getCompletedModelKey())).findFirst().orElseThrow().getStatus()).isEqualTo("SUPERSEDED");
-        assertThat(history.stream().filter(r->modelKey.equals(r.getCompletedModelKey())).findFirst().orElseThrow().getStatus()).isEqualTo("COMPLETED");
+        assertThat(requests.findByDishIdOrderByRequestedAtDesc(dish.getId())).isEmpty();
+        var history=modelHistory.list(restaurant.getId(),dish.getId(),0);
+        assertThat(history).hasSize(2).allSatisfy(v->assertThat(v).containsEntry("origin","ADMIN_DIRECT").containsEntry("retention","HELD"));
+        assertThat(db.queryForObject("select state from model_versions where dish_id=? and object_key=?",String.class,dish.getId(),firstKey)).isEqualTo("SUPERSEDED");
+        assertThat(db.queryForObject("select state from model_versions where dish_id=? and object_key=?",String.class,dish.getId(),modelKey)).isEqualTo("CURRENT");
         assertThat(restaurants.findById(restaurant.getId()).orElseThrow().getStorageUsedBytes()).isEqualTo(500L);
         assertThat(restaurants.findById(restaurant.getId()).orElseThrow().getModel3dCount()).isOne();
     }

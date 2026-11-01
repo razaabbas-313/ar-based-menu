@@ -11,15 +11,17 @@ import FilterBar from '../components/guest/FilterBar.jsx';
 import ArHandoffModal from '../components/ArHandoffModal.jsx';
 import { Spinner } from '../components/ui.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import { api } from '../api/client.js';
+import { api, API_BASE } from '../api/client.js';
 import { CATEGORY_LABEL, CATEGORY_ORDER, buzz, cx } from '../utils/format.js';
+import { observe } from '../utils/insights.js';
+import { appearanceStyle, brandedRestaurant } from '../utils/appearance.js';
 import { accentStyle } from '../utils/theme.js';
 import { linkProps, navigate, useLocation } from '../utils/router.js';
 
 const EMPTY_FILTERS = { tags: [], chefPicks: false, arOnly: false };
 
 /** /r/:slug: the public, mobile-first menu. Photos only on the feed; 3D loads on demand. */
-export default function GuestMenuPage({ slug }) {
+export default function GuestMenuPage({ slug,previewOnly=false,studioAppearance }) {
   const { restaurant: me } = useAuth();
   const { query: params } = useLocation();
   const tableToken=params.get('table');
@@ -27,7 +29,10 @@ export default function GuestMenuPage({ slug }) {
   const [context,setContext]=useState(null);
   const [cartNotice,setCartNotice]=useState('');
   const isOwner = me?.slug === slug;
-  const isPreview = params.get('preview') === 'true';
+  const isPreview = previewOnly || params.get('preview') === 'true';
+  const [appearance,setAppearance]=useState(null),[reviewUrl,setReviewUrl]=useState(null);
+  useEffect(()=>{let alive=true;setAppearance(null);setReviewUrl(null);if(studioAppearance)return;api.publicAppearance(slug).then(data=>{if(alive){setAppearance(data.appearance);setReviewUrl(data.review?.url||null);}}).catch(()=>{});return()=>{alive=false;};},[slug,studioAppearance]);
+  const effectiveAppearance=studioAppearance||appearance;
   const [state, setState] = useState({ status: 'loading', restaurant: null, categories: [], items: [], error: '' });
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -36,6 +41,10 @@ export default function GuestMenuPage({ slug }) {
   const [activeCat, setActiveCat] = useState(null);
   const deepLinkDone = useRef(false);
   const sectionRefs = useRef({});
+  const visitRecorded=useRef('');
+  const observation=(type,dishId=null,category=null)=>{if(!isOwner&&!isPreview)observe(slug,type,{dishId,tableToken,category});};
+  useEffect(()=>{if(!isOwner&&!isPreview&&state.status==='ready'&&context&&!context.contextError){const key=slug+'|'+(tableToken||'venue');if(visitRecorded.current!==key){visitRecorded.current=key;observation('MENU_VISIT');}}},[slug,tableToken,state.status,context,isOwner,isPreview]);
+  useEffect(()=>{if(open?.id)observation('DISH_DETAIL_VIEW',open.id);},[open?.id]);
 
   const load = useCallback(() => {
     const fetchMenu = (isPreview && isOwner)
@@ -69,7 +78,7 @@ export default function GuestMenuPage({ slug }) {
     load();
   }, [load]);
 
-  useEffect(()=>{if(state.status!=='ready')return;let live=true;setContext(null);api.guestContext(slug,tableToken).then(value=>{if(live)setContext(value);}).catch(()=>{if(live)setContext({contextError:'Table and request availability could not be checked. Refresh the menu to try again.',orderingAvailable:false,waiterAvailable:false});});return()=>{live=false;};},[slug,tableToken,state.status,state.items]);
+  useEffect(()=>{if(isPreview||state.status!=='ready')return;let live=true;setContext(null);api.guestContext(slug,tableToken).then(value=>{if(live)setContext(value);}).catch(()=>{if(live)setContext({contextError:'Table and request availability could not be checked. Refresh the menu to try again.',orderingAvailable:false,waiterAvailable:false});});return()=>{live=false;};},[slug,tableToken,state.status,state.items,isPreview]);
   useEffect(()=>{if(state.menuMode==='SIMPLE')setFilters(f=>({...f,arOnly:false}));},[state.menuMode]);
 
   // Deep link from the AR hand-off QR code: /r/:slug?dish=<id>
@@ -201,13 +210,14 @@ export default function GuestMenuPage({ slug }) {
   }, [sections]);
 
   const jumpTo = (key) => {
+    observation('CATEGORY_SELECTED',null,/^\d+$/.test(key)||['STARTERS','MAINS','CHEF_SPECIALS','DESSERTS','DRINKS'].includes(key)?key:'OTHER');
     setActiveCat(key);
-    sectionRefs.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    sectionRefs.current[key]?.scrollIntoView({ behavior: effectiveAppearance?.motion==='reduced'||window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth', block: 'start' });
   };
 
   const closeSheet = () => {
     setOpen(null);
-    if (params.get('dish')) navigate(`/r/${slug}`, { replace: true, scroll: false });
+    if (params.get('dish')){const query=new URLSearchParams(params);query.delete('dish');navigate(`/r/${slug}${query.size?'?'+query.toString():''}`,{replace:true,scroll:false});}
   };
 
   if (state.status === 'loading') {
@@ -220,10 +230,10 @@ export default function GuestMenuPage({ slug }) {
 
   // Luxury Holding Screen when Menu is set to Private
   if (state.restaurant && state.restaurant.isMenuLive === false && !isOwner && !isPreview) {
-    const r = state.restaurant;
+    const r = brandedRestaurant(state.restaurant,effectiveAppearance,API_BASE);
     return (
       <div className="min-h-screen bg-[#0a0a0c] text-zinc-100 flex flex-col justify-between" style={accentStyle(r.themeAccent)}>
-        <Navbar />
+        {!previewOnly&&<Navbar />}
         <div className="mx-auto flex max-w-xl flex-col items-center px-6 py-20 text-center">
           <div className="relative mb-6 h-24 w-24 overflow-hidden rounded-3xl border border-accent-500/30 bg-onyx shadow-2xl">
             {r.logoUrl ? (
@@ -317,17 +327,18 @@ export default function GuestMenuPage({ slug }) {
     );
   }
 
-  const r = state.restaurant;
+  const r = brandedRestaurant(state.restaurant,effectiveAppearance,API_BASE);
   const compact = r.menuLayout === 'compact';
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] pb-32" style={accentStyle(r.themeAccent)}>
-      <MenuHero menuMode={state.menuMode} restaurant={r} dishCount={state.items.length} arCount={state.items.filter((i) => i.is3d).length} />
+    <div className="atelier-menu min-h-screen bg-[#0a0a0c] pb-32" data-theme={effectiveAppearance?.preset} data-card={effectiveAppearance?.card} data-category={effectiveAppearance?.category} data-motion={effectiveAppearance?.motion} style={{...accentStyle(r.themeAccent),...(effectiveAppearance?appearanceStyle(effectiveAppearance):{})}}>
+      <MenuHero reducedMotion={previewOnly||effectiveAppearance?.motion==='reduced'} menuMode={state.menuMode} restaurant={r} dishCount={state.items.length} arCount={state.items.filter((i) => i.is3d).length} />
 
-      <GuestActions slug={slug} tableToken={tableToken} context={context} cart={cart} setCart={setCart} notes={notes} setNotes={setNotes} dishes={state.items} onRefresh={()=>{setContext(null);load();}} />
+      {!isPreview&&<GuestActions slug={slug} tableToken={tableToken} context={context} onObservation={isOwner||isPreview?undefined:observation} cart={cart} setCart={setCart} notes={notes} setNotes={setNotes} dishes={state.items} onRefresh={()=>{setContext(null);load();}} />}
       {cartNotice&&<p role="status" className="mx-auto max-w-3xl px-6 text-sm text-amber-200">{cartNotice}</p>}
       <div className="mt-8">
         <CategoryNav
+          reducedMotion={effectiveAppearance?.motion==='reduced'}
           restaurantName={r.name}
           categories={sections.map((s) => ({ key: s.key, label: s.label, count: s.items.length }))}
           active={activeCat}
@@ -336,7 +347,7 @@ export default function GuestMenuPage({ slug }) {
       </div>
 
       <main className="mx-auto max-w-3xl px-4 pt-6 sm:px-6">
-        {isOwner && (
+        {isOwner && !isPreview && (
           <a
             {...linkProps('/studio')}
             className="tap mb-6 flex items-center justify-between gap-3 rounded-2xl border border-accent-500/30 bg-accent-500/10 px-4 py-3 text-sm text-accent-300"
@@ -408,6 +419,7 @@ export default function GuestMenuPage({ slug }) {
         )}
 
         <footer className="mt-14 border-t border-white/5 pb-6 pt-6 text-center">
+          {reviewUrl&&!isPreview&&<a href={reviewUrl} onClick={()=>observation('REVIEW_LINK_OPENED')} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="mb-6 inline-flex min-h-12 items-center rounded-full border border-accent-400/30 px-6 text-sm font-semibold text-accent-300">Review us on Google ↗</a>}
           <div className="font-display text-lg italic text-zinc-500">{r.name}</div>
           <a {...linkProps('/')} className="mt-1 inline-block font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600 hover:text-zinc-400">
             Menu by Atelier
@@ -422,9 +434,12 @@ export default function GuestMenuPage({ slug }) {
       {open && (
         <DishSheet
           item={open}
+          appearance={effectiveAppearance}
+          onObservation={isOwner||isPreview?undefined:observation}
+          reducedMotion={effectiveAppearance?.motion==='reduced'}
           arAllowed={state.menuMode ? state.menuMode==='AR' : (state.allowedModes || ['SIMPLE','THREE_D','AR']).includes('AR')}
-          onAddToCart={context?.orderingAvailable ? item=>{try{setCart(addDish(cart,item));setCartNotice(`${item.dishTitle} added. Open Your request above the menu to review.`);closeSheet();}catch(e){setCartNotice(e.message);}} : undefined}
-          slug={slug}
+          onAddToCart={!isPreview&&context?.orderingAvailable ? item=>{try{setCart(addDish(cart,item));observation('CART_ADD',item.id);setCartNotice(`${item.dishTitle} added. Open Your request above the menu to review.`);closeSheet();}catch(e){setCartNotice(e.message);}} : undefined}
+          slug={isPreview?undefined:slug}
           currency={r.currencyCode}
           currencySymbol={r.currencySymbol}
           onClose={closeSheet}

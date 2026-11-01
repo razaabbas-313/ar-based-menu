@@ -85,9 +85,10 @@ export async function uploadDishPhoto({ photo, meta, onStage = noop, onProgress 
 }
 
 /** Attach or replace a 3D model on an existing dish: attach-3d -> PUT -> confirm-3d. */
-export async function attachModel({ dishId, model, placement, onStage = noop, onProgress = noop }) {
+export async function attachModel({ dishId, model, placement, adminRestaurantId, onStage = noop, onProgress = noop }) {
   onStage('model-sign', { status: 'active' });
-  const presign = await api.attach3d(dishId, {
+  const sign=adminRestaurantId?(id,body)=>api.adminDirectModelPresign(adminRestaurantId,id,body):api.attach3d;
+  const presign = await sign(dishId, {
     filename: sanitizeFilename(model.name, model.meta.ext),
     contentType: model.meta.contentType,
     uploadSizeBytes: model.file.size,
@@ -98,20 +99,22 @@ export async function attachModel({ dishId, model, placement, onStage = noop, on
   const etag = await stream(presign, model.file, onStage, onProgress, 'model-stream');
 
   onStage('model-sync', { status: 'active' });
-  const dish = await api.confirm3d(dishId, { s3Key: presign.objectKey, etag });
+  const confirm=adminRestaurantId?(id,body)=>api.adminDirectModelConfirm(adminRestaurantId,id,body):api.confirm3d;
+  const dish = await confirm(dishId, { s3Key: presign.objectKey, etag,arPlacement:placement||'table' });
   onStage('model-sync', { status: 'done', detail: '3D model linked · AR enabled' });
   return dish;
 }
 
 /** Logo / banner: presign -> PUT -> confirm. Returns the updated studio settings. */
-export async function uploadBrandingImage(kind, image, onProgress = noop) {
-  const presign = await api.brandingPresign(kind, {
+export async function uploadBrandingImage(kind, image, onProgress = noop, {draft=false}={}) {
+  const sign=draft?(kind,body)=>api.draftImagePresign(kind.toUpperCase(),body):api.brandingPresign;
+  const presign = await sign(kind, {
     filename: sanitizeFilename(image.name || kind, image.ext),
     contentType: image.mime,
     uploadSizeBytes: image.blob.size,
   });
   await putToS3(presign.uploadUrl, image.blob, presign.requiredHeaders, onProgress);
-  return api.brandingConfirm(kind, { s3Key: presign.objectKey });
+  return draft?api.draftImageConfirm(presign.id):api.brandingConfirm(kind, { s3Key: presign.objectKey });
 }
 
 /**

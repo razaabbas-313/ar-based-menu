@@ -22,6 +22,7 @@ import {
 import AdminLogin from '../components/admin/AdminLogin.jsx';
 import ChangePasswordModal from '../components/admin/ChangePasswordModal.jsx';
 import KpiCards from '../components/admin/KpiCards.jsx';
+import InsightDashboard from '../components/studio/InsightDashboard.jsx';
 import PlansManager from '../components/admin/PlansManager.jsx';
 import RestaurantTable from '../components/admin/RestaurantTable.jsx';
 import RestaurantFormModal from '../components/admin/RestaurantFormModal.jsx';
@@ -320,6 +321,8 @@ function Console() {
           <button type="button" onClick={() => setMainTab('plans')} className={cx('tap flex h-11 items-center gap-2 rounded-full border px-5 text-sm font-semibold', mainTab === 'plans' ? 'border-amber-500 bg-amber-500 text-zinc-950' : 'hairline text-zinc-400 hover:text-zinc-100')}><ShieldCheck size={16} />Plans & capabilities</button>
         </div>
 
+        <button type="button" onClick={()=>setMainTab('insights')} className="mb-5 min-h-11 rounded-full border hairline px-5 text-sm">Platform insights</button>
+        {mainTab === 'insights' && <InsightDashboard platform/>}
         {mainTab === 'plans' && <PlansManager />}
         {mainTab === 'restaurants' && (
           <section>

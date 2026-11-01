@@ -15,7 +15,7 @@ const STAGES = [
 ];
 
 /** Attach, replace or remove a dish's 3D model without touching its photo. */
-export default function ModelModal({ dish, onClose, onSaved }) {
+export default function ModelModal({ dish, onClose, onSaved, adminRestaurantId }) {
   const [model, setModel] = useState(null);
   const [placement, setPlacement] = useState(dish.arPlacement || 'table');
   const [stages, setStages] = useState(makeStages(STAGES));
@@ -35,6 +35,7 @@ export default function ModelModal({ dish, onClose, onSaved }) {
     try {
       const saved = await attachModel({
         dishId: dish.id,
+        adminRestaurantId,
         model,
         placement,
         onStage: (key, u) => {
@@ -77,7 +78,7 @@ export default function ModelModal({ dish, onClose, onSaved }) {
           <IconButton icon={X} label="Close" onClick={() => phase !== 'running' && onClose()} />
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
-          {dish.is3d && !model && phase !== 'running' && (
+          {!adminRestaurantId && dish.is3d && !model && phase !== 'running' && (
             <div className="overflow-hidden rounded-3xl border hairline">
               <div className="stage-bg relative aspect-[16/10]">
                 <ModelStage src={dish.modelUrl} alt={dish.dishTitle} arPlacement={dish.arPlacement} variant="full" />
